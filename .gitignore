@@ -1,0 +1,29 @@
+# Binaries
+/kauket
+/dist/
+
+# Test artifacts
+coverage.out
+*.test
+*.prof
+
+# Local secrets / encrypted blobs leaked into the tree
+*.age
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go module download cache (rare)
+/vendor/
+
+# Local development overrides
+.envrc
+.env
+.env.*
