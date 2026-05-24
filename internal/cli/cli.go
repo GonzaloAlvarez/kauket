@@ -1,12 +1,9 @@
 package cli
 
-import (
-	"fmt"
-
-	"github.com/gonzaloalvarez/kauket/internal/buildflags"
-)
+import "github.com/gonzaloalvarez/kauket/internal/app"
 
 func Execute() error {
-	fmt.Printf("kauket %s (not yet implemented)\n", buildflags.Version)
-	return nil
+	a := app.New()
+	cmd := NewRoot(a)
+	return cmd.Execute()
 }
