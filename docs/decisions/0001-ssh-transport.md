@@ -26,9 +26,9 @@ Findings:
 
 **Primary**: implement `internal/gitstore.SSHDeployKeyTransport` using `go-git/v5/plumbing/transport/ssh` directly. Embed a small static known-hosts pin file with the current GitHub `ssh-ed25519`, `ssh-rsa`, and `ecdsa-sha2-nistp256` entries (rotation procedure documented in this ADR). Load the deploy key from `~/.config/kauket/git/deploy_key` (mode 0600) and convert to an `ssh.Signer` once at startup; never hold the raw bytes longer than necessary.
 
-**Fallback**: implement `internal/gitstore.SystemGitTransport` that satisfies the same `Transport` interface, shelling out to `git` with `GIT_SSH_COMMAND` configured. This is selected only when the in-process path is explicitly disabled via `KAUKET_GIT_TRANSPORT=system` (env var) or auto-disabled if `go-git` returns an SSH handshake error pattern matching a known set of in-process-only failures and a `git` binary is found in `PATH`.
+**Fallback (deferred past v1)**: a system-`git` transport that shells out with `GIT_SSH_COMMAND` configured was originally planned to back the same `Transport` interface and be selected when the in-process path was explicitly disabled via `KAUKET_GIT_TRANSPORT=system`. v1 ships **only** the in-process `SSHDeployKeyTransport`. The fallback is not implemented because the existing `Store` only consumes `transport.AuthMethod` (which the system-git path does not satisfy); a shell-out path would require a separate `Store` code path. We defer that work until field testing surfaces an environment where the in-process transport is genuinely unworkable. If it becomes necessary, this ADR will be superseded by a follow-up describing the dual-path design.
 
-Both implementations are constructed behind the same `internal/gitstore.Transport` interface so callers see no difference. Tests in `internal/gitstore` cover only the HTTPS + `file://` path; the SSH path is exercised in `e2e/github_test.go` (gated by `KAUKET_GITHUB_E2E=1`), where real network conditions and real GitHub host keys are present.
+The single transport is constructed behind the existing `internal/gitstore.Transport` interface so future callers can swap implementations without touching `Store`. Tests in `internal/gitstore` cover the HTTPS, `file://`, and (offline) SSH selection paths; the SSH path is exercised end-to-end in `e2e/github_test.go` (gated by `KAUKET_GITHUB_E2E=1`), where real network conditions and real GitHub host keys are present.
 
 ## Known-hosts pin rotation
 
@@ -42,7 +42,7 @@ ssh-keyscan -t ed25519,rsa,ecdsa github.com > internal/gitstore/github_known_hos
 
 ## Consequences
 
-- v1 ships with both transports compiled in; `Transport` interface keeps the call sites clean.
+- v1 ships only the in-process SSH transport; `Transport` interface keeps the call sites clean and leaves room for the deferred system-`git` fallback.
 - Adding `age-plugin-yubikey` later doesn't touch this code (signer becomes a plugin-backed `ssh.Signer`).
-- Developers behind networks that filter outbound port 22 can set `KAUKET_GIT_TRANSPORT=system` to fall back to shell-out, which uses ssh-over-443 or any proxy configuration the user has already wired into their `~/.ssh/config`.
+- Developers behind networks that filter outbound port 22 currently have no in-tool workaround. If this proves to bite in practice we revisit the deferred system-`git` fallback (which would use ssh-over-443 or any proxy configuration the user has already wired into their `~/.ssh/config`).
 - The hard-coded known-hosts pin is a maintenance liability; the rotation procedure above keeps it manageable.
