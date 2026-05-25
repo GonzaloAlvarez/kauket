@@ -28,17 +28,31 @@ jobs:
             exit 1
           fi
 
-      - name: vet
+      - name: go vet
         run: go vet ./...
 
       - name: build
         run: go build ./...
 
-      - name: test
-        run: go test ./...
+      - name: install dev tooling
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@latest
 
-      - name: test -race
-        run: go test -race ./...
+      - name: staticcheck
+        run: $(go env GOPATH)/bin/staticcheck ./...
+
+      - name: govulncheck
+        run: $(go env GOPATH)/bin/govulncheck ./...
+
+      - name: unit tests
+        run: go test ./... -count=1
+
+      - name: unit tests -race
+        run: go test ./... -race -count=1
 
       - name: check-comments
         run: ./scripts/check-comments.sh
+
+      - name: e2e local
+        run: ./scripts/e2e-local.sh
