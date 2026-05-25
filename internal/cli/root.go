@@ -20,6 +20,8 @@ func NewRoot(a *app.App) *cobra.Command {
 		NewSync(a),
 		NewAdd(a),
 		NewList(a),
+		NewApprove(a),
+		NewGet(a),
 	)
 	return root
 }
