@@ -150,6 +150,9 @@ func expandPath(p string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("install: user home: %w", err)
 		}
+		if resolved, err := filepath.EvalSymlinks(home); err == nil {
+			home = resolved
+		}
 		rest := strings.TrimPrefix(p, "~")
 		if rest == "" {
 			return home, nil
