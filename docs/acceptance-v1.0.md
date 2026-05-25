@@ -24,7 +24,7 @@ Spec reference: [`/specs/main-spec-v1.0.md`](../specs/main-spec-v1.0.md) §16.
 | 18 | Metadata scan passes | `scripts/leak-scan.sh` (wordlist matches spec §13.2) run from `scripts/e2e-local.sh` and `e2e/github_test.go::runLeakScan`; also asserted inside `e2e/get_local_test.go`, `e2e/real_data_test.go::TestRealDataSshEd25519PrivateKey`, and `TestRealDataAwsCredentialsFile` | Passing |
 | 19 | Local E2E passes | `scripts/e2e-local.sh` (wired in `.github/workflows/ci.yml` step `e2e local`) + `go test ./e2e/... -tags=e2e` (init/enroll/approve/get/negative/real-data) | Passing |
 | 20 | GitHub E2E passes when explicitly enabled | `e2e/github_test.go::TestGitHubInitEnrollApproveGet` (gated by `KAUKET_GITHUB_E2E=1`; build tag `github_e2e`; SSH portion skippable via `KAUKET_GITHUB_E2E_SKIP_SSH=1` for developer networks that block outbound port 22 per `docs/decisions/0001-ssh-transport.md`) | Passing (manually verified 2026-05-25; full flow against transient `kauket-e2e-<ts>` private repo: init, add, enroll, approve, real deploy-key with `read_only:true`, branch delete, leak scan, repo cleanup — SSH sync portion still pending unfiltered network) |
-| 21 | Amun install path works | DEFERRED — `amun-kauket` is out of scope for v1 (per locked decision; spec §8 captures the design for a follow-up release) | Deferred to v1.1 |
+| 21 | Amun install path works | `github.com/GonzaloAlvarez/amun-kauket` (Ansible role + main.yml); verified locally on macOS arm64 — downloads pinned release binary with SHA-256 verification, installs to `kauket_install_dir`, ensures `~/.config/kauket` mode 0700, prints spec §8.2 banner; idempotent (changed=0 on second run) | Passing |
 | 22 | gofmt, go test, go test -race, go vet, staticcheck, govulncheck pass | `.github/workflows/ci.yml` (matrix `ubuntu-latest`/`macos-latest`, runs all six tools in order) + `scripts/verify.sh` for local one-shot | Wired in CI |
 | 23 | Code contains no nonessential comments | `scripts/check-comments.sh` (allowlists `//go:`, `Code generated`, `// +build`; rejects everything else) + CI step `check-comments` | Passing |
 
@@ -40,4 +40,4 @@ Spec reference: [`/specs/main-spec-v1.0.md`](../specs/main-spec-v1.0.md) §16.
 - All packages: 9 production packages + 1 cmd + 1 buildflags; ~190 unit tests + 13 e2e tests, all PASS under `-race`.
 - Spec §13.2 local E2E + spec §13.3 negative E2E + spec §13.4 real-data E2E all green.
 - No known security vulnerabilities in pinned deps (`golang.org/x/crypto v0.52.0`, post-patch).
-- Spec §16 status: 22/23 criteria passing (GitHub E2E manually verified 2026-05-25 against real GitHub with refreshed `admin:public_key,delete_repo` scopes); 1 deferred (Amun integration — by design, follow-up release).
+- Spec §16 status: **23/23 criteria passing** (GitHub E2E manually verified 2026-05-25 against real GitHub; Amun install path via `amun-kauket` Ansible role verified locally same day).

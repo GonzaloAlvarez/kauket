@@ -29,11 +29,19 @@ kauket get ssh.main_private_key
 
 ## Install
 
+Via [amun](https://github.com/GonzaloAlvarez/amun) (recommended; verifies checksum, installs binary, creates `~/.config/kauket` with mode 0700):
+
+```sh
+amun kauket
+```
+
+Via `go install`:
+
 ```sh
 go install github.com/gonzaloalvarez/kauket/cmd/kauket@latest
 ```
 
-GitHub Release binaries for linux/darwin × amd64/arm64 are attached to each tagged release.
+GitHub Release binaries for linux/darwin × amd64/arm64 are attached to each tagged release at <https://github.com/GonzaloAlvarez/kauket/releases>.
 
 ## Spec
 
