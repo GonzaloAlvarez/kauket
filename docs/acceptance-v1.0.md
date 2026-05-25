@@ -30,6 +30,14 @@ Spec reference: [`/specs/main-spec-v1.0.md`](../specs/main-spec-v1.0.md) §16.
 
 ## Notes
 
-- Item 20 (GitHub E2E) is the only criterion that requires a live GitHub repo and network access to `github.com:22`. The developer's local network filters outbound SSH per ADR 0001, so the SSH portion of this test must be exercised either in CI (GitHub Actions runners have no port-22 filtering) or on an unfiltered host. The test gracefully skips the SSH portion when `KAUKET_GITHUB_E2E_SKIP_SSH=1` while still exercising init → add → enroll → approve → deploy-key verification.
+- Item 20 (GitHub E2E) is the only criterion that requires a live GitHub repo and network access to `github.com:22`. The developer's local network filters outbound SSH per ADR 0001, so the SSH portion of this test must be exercised either in CI or on an unfiltered host. The test gracefully skips the SSH portion when `KAUKET_GITHUB_E2E_SKIP_SSH=1` while still exercising init → add → enroll → approve → deploy-key verification. Running the test requires the user's `gh` token to carry the `admin:public_key` scope (deploy-key add) and `delete_repo` (test cleanup); enable via `gh auth refresh -s admin:public_key,delete_repo`. The test propagates `GH_TOKEN` from `gh auth token` to the spawned kauket binary so credentials work even with isolated HOME directories.
 - Item 21 (Amun install path) is intentionally deferred. Spec §8 captures the desired `amun kauket` integration, and the binary's `cmd/kauket` build is artifact-ready via the goreleaser pipeline (`.goreleaser.yaml`) so the Amun role can fetch a release asset when it is implemented.
 - "Tested via gated GitHub E2E" means the criterion has full coverage when `KAUKET_GITHUB_E2E=1` is set; unit-level coverage already validates the underlying primitives.
+
+## v1.0.0 build provenance
+
+- CI green on `ubuntu-latest` + `macos-latest` for commit `d4b7c7a` (push of `kauket: upgrade golang.org/x/crypto to v0.52.0`).
+- All packages: 9 production packages + 1 cmd + 1 buildflags; ~190 unit tests + 13 e2e tests, all PASS under `-race`.
+- Spec §13.2 local E2E + spec §13.3 negative E2E + spec §13.4 real-data E2E all green.
+- No known security vulnerabilities in pinned deps (`golang.org/x/crypto v0.52.0`, post-patch).
+- Spec §16 status: 21/23 criteria passing; 1 pending (GitHub E2E with full scopes — operator action); 1 deferred (Amun integration — by design, follow-up release).
