@@ -55,9 +55,9 @@ func TestStatusAdminAfterInit(t *testing.T) {
 }
 
 func TestStatusClient(t *testing.T) {
-	a, fake, home := newTestApp(t)
+	a, _, home := newTestApp(t)
 	a.UI = &ui.Fake{}
-	fake = a.UI.(*ui.Fake)
+	fake := a.UI.(*ui.Fake)
 	clientCfg := &config.Client{
 		Schema:  config.ConfigSchema,
 		Role:    config.RoleClient,

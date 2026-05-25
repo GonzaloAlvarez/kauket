@@ -47,6 +47,14 @@ func TestGitHubInitEnrollApproveGet(t *testing.T) {
 		t.Skipf("gh not authenticated as %s: %v", owner, err)
 	}
 
+	if os.Getenv("GH_TOKEN") == "" {
+		tokOut, err := exec.Command("gh", "auth", "token").Output()
+		if err != nil {
+			t.Skipf("could not capture gh auth token: %v", err)
+		}
+		t.Setenv("GH_TOKEN", strings.TrimSpace(string(tokOut)))
+	}
+
 	bin := buildBinary(t)
 
 	cleanedUp := false

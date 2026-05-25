@@ -50,7 +50,7 @@ func (t *Terminal) Confirm(prompt string) (bool, error) {
 }
 
 func (t *Terminal) Promptf(format string, args ...any) (string, error) {
-	fmt.Fprint(t.Stdout, fmt.Sprintf(format, args...))
+	fmt.Fprintf(t.Stdout, format, args...)
 	line, err := readLine(t.Stdin)
 	if err != nil {
 		return "", err
