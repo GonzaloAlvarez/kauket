@@ -27,7 +27,7 @@ type ghDeployKey struct {
 
 type ghRepoView struct {
 	Name    string `json:"name"`
-	Private bool   `json:"private"`
+	Private bool   `json:"isPrivate"`
 }
 
 func TestGitHubInitEnrollApproveGet(t *testing.T) {
@@ -216,7 +216,7 @@ func ghRepoViewJSON(t *testing.T, slug string) (*ghRepoView, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "gh", "repo", "view", slug, "--json", "name,private").CombinedOutput()
+	out, err := exec.CommandContext(ctx, "gh", "repo", "view", slug, "--json", "name,isPrivate").CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("gh repo view %s: %w\n%s", slug, err, string(out))
 	}
