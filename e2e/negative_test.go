@@ -5,69 +5,10 @@ package e2e_test
 import (
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
-
-func mustResolvedTempRoot(t *testing.T) string {
-	t.Helper()
-	root := t.TempDir()
-	resolved, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		t.Fatalf("eval symlinks: %v", err)
-	}
-	return resolved
-}
-
-func mustMkdir(t *testing.T, dir string, mode os.FileMode) {
-	t.Helper()
-	if err := os.MkdirAll(dir, mode); err != nil {
-		t.Fatalf("mkdir %s: %v", dir, err)
-	}
-}
-
-func exitCodeOf(err error) int {
-	if err == nil {
-		return 0
-	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return exitErr.ExitCode()
-	}
-	return -1
-}
-
-func readHostID(t *testing.T, clientKauket string) string {
-	t.Helper()
-	cfgPath := filepath.Join(clientKauket, "config.json")
-	data, err := os.ReadFile(cfgPath)
-	if err != nil {
-		t.Fatalf("read client config: %v", err)
-	}
-	s := string(data)
-	idx := strings.Index(s, `"host"`)
-	if idx < 0 {
-		t.Fatalf("client config missing host block: %s", s)
-	}
-	rest := s[idx:]
-	idIdx := strings.Index(rest, `"id"`)
-	if idIdx < 0 {
-		t.Fatalf("client config host missing id: %s", s)
-	}
-	rest = rest[idIdx+len(`"id"`):]
-	colon := strings.Index(rest, `"h_`)
-	if colon < 0 {
-		t.Fatalf("client config host id not h_*: %s", s)
-	}
-	rest = rest[colon+1:]
-	end := strings.Index(rest, `"`)
-	if end < 0 {
-		t.Fatalf("client config host id unterminated: %s", s)
-	}
-	return rest[:end]
-}
 
 func TestNegativeUnapprovedMachineCannotGetSecret(t *testing.T) {
 	bin := buildBinary(t)
@@ -271,6 +212,9 @@ func TestNegativeExistingUnmanagedFile(t *testing.T) {
 	if !strings.Contains(combined, "creating ~/.ssh/main_private_key") {
 		t.Fatalf("expected output to contain 'creating ~/.ssh/main_private_key', got stdout=%q stderr=%q", res.stdout, res.stderr)
 	}
+	if !strings.Contains(combined, "backup created") {
+		t.Fatalf("expected output to contain 'backup created', got stdout=%q stderr=%q", res.stdout, res.stderr)
+	}
 
 	entries, err := os.ReadDir(sshDir)
 	if err != nil {
@@ -358,11 +302,8 @@ func TestNegativeSymlinkDestination(t *testing.T) {
 	if code := exitCodeOf(res.err); code != 4 {
 		t.Fatalf("expected exit code 4 (ExitInstall), got %d; stderr:%s", code, res.stderr)
 	}
-	if !strings.Contains(res.stderr, "symlink") {
-		t.Fatalf("expected stderr to mention 'symlink', got: %q", res.stderr)
-	}
-	if !strings.Contains(res.stderr, "refusing") {
-		t.Fatalf("expected stderr to mention 'refusing', got: %q", res.stderr)
+	if !strings.Contains(res.stderr, "refusing to write through symlink") {
+		t.Fatalf("expected stderr to contain 'refusing to write through symlink', got: %q", res.stderr)
 	}
 
 	if _, err := os.Stat(evilTarget); !errors.Is(err, os.ErrNotExist) {

@@ -51,6 +51,9 @@ jobs:
       - name: unit tests -race
         run: go test ./... -race -count=1
 
+      - name: e2e Go tests
+        run: go test ./e2e/... -tags=e2e -race -count=1
+
       - name: check-comments
         run: ./scripts/check-comments.sh
 

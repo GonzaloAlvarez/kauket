@@ -3,92 +3,12 @@
 package e2e_test
 
 import (
-	"bytes"
-	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
-
-	gogit "github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
 )
-
-func buildBinary(t *testing.T) string {
-	t.Helper()
-	bin := filepath.Join(t.TempDir(), "kauket")
-	if runtime.GOOS == "windows" {
-		bin += ".exe"
-	}
-	root, err := repoRoot()
-	if err != nil {
-		t.Fatalf("repo root: %v", err)
-	}
-	cmd := exec.Command("go", "build", "-o", bin, "./cmd/kauket")
-	cmd.Dir = root
-	cmd.Env = os.Environ()
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("go build: %v\n%s", err, string(out))
-	}
-	return bin
-}
-
-func repoRoot() (string, error) {
-	wd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	dir := wd
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", errors.New("could not find go.mod above " + wd)
-		}
-		dir = parent
-	}
-}
-
-func setupBareRemote(t *testing.T, dir string) string {
-	t.Helper()
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatalf("mkdir bare: %v", err)
-	}
-	repo, err := gogit.PlainInit(dir, true)
-	if err != nil {
-		t.Fatalf("bare init: %v", err)
-	}
-	headRef := plumbing.NewSymbolicReference(plumbing.HEAD, plumbing.NewBranchReferenceName("main"))
-	if err := repo.Storer.SetReference(headRef); err != nil {
-		t.Fatalf("set HEAD: %v", err)
-	}
-	return "file://" + dir
-}
-
-type runResult struct {
-	stdout string
-	stderr string
-	err    error
-}
-
-func runKauket(t *testing.T, bin, kauketHome, home string, args ...string) runResult {
-	t.Helper()
-	cmd := exec.Command(bin, args...)
-	cmd.Env = append(os.Environ(),
-		"KAUKET_HOME="+kauketHome,
-		"HOME="+home,
-	)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	return runResult{stdout: stdout.String(), stderr: stderr.String(), err: err}
-}
 
 func TestInitLocalE2E(t *testing.T) {
 	bin := buildBinary(t)
@@ -171,17 +91,5 @@ func TestInitLocalE2E(t *testing.T) {
 	}
 	if strings.TrimSpace(res.stdout) != "synced" {
 		t.Fatalf("expected 'synced', got: %q", res.stdout)
-	}
-}
-
-func assertMode(t *testing.T, path string, want os.FileMode) {
-	t.Helper()
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("stat %s: %v", path, err)
-	}
-	got := info.Mode().Perm()
-	if got != want {
-		t.Fatalf("mode for %s: want %v, got %v", path, want, got)
 	}
 }

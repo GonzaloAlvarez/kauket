@@ -3,45 +3,13 @@
 package e2e_test
 
 import (
-	"crypto/ed25519"
-	"crypto/rand"
-	"encoding/pem"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
-
-	cryptossh "golang.org/x/crypto/ssh"
 )
-
-func generateEd25519KeyFile(t *testing.T, path string) {
-	t.Helper()
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatalf("generate ed25519: %v", err)
-	}
-	block, err := cryptossh.MarshalPrivateKey(priv, "kauket-test")
-	if err != nil {
-		t.Fatalf("marshal private key: %v", err)
-	}
-	pemBytes := pem.EncodeToMemory(block)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatalf("mkdir key dir: %v", err)
-	}
-	if err := os.WriteFile(path, pemBytes, 0o600); err != nil {
-		t.Fatalf("write key: %v", err)
-	}
-	sshPub, err := cryptossh.NewPublicKey(pub)
-	if err != nil {
-		t.Fatalf("ssh public key: %v", err)
-	}
-	pubAuthorized := strings.TrimSpace(string(cryptossh.MarshalAuthorizedKey(sshPub)))
-	if err := os.WriteFile(path+".pub", []byte(pubAuthorized+"\n"), 0o644); err != nil {
-		t.Fatalf("write pub: %v", err)
-	}
-}
 
 func TestGetLocalE2E(t *testing.T) {
 	bin := buildBinary(t)
@@ -153,46 +121,4 @@ func TestGetLocalE2E(t *testing.T) {
 			t.Fatalf("forbidden term %q present in admin checkout: %v", term, hits)
 		}
 	}
-}
-
-func grepRepo(t *testing.T, dir, term string) []string {
-	t.Helper()
-	var hits []string
-	lowerTerm := strings.ToLower(term)
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-		data, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return nil
-		}
-		if isBinaryContent(data) {
-			return nil
-		}
-		if strings.Contains(strings.ToLower(string(data)), lowerTerm) {
-			hits = append(hits, path)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk %s: %v", dir, err)
-	}
-	return hits
-}
-
-func isBinaryContent(data []byte) bool {
-	limit := len(data)
-	if limit > 8000 {
-		limit = 8000
-	}
-	for i := 0; i < limit; i++ {
-		if data[i] == 0 {
-			return true
-		}
-	}
-	return false
 }
