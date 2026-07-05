@@ -36,7 +36,10 @@ func runSync(ctx context.Context, a *app.App) error {
 		return &ExitError{Code: ExitUsage, Err: err}
 	}
 
-	var remoteURL string
+	var (
+		remoteURL string
+		transport gitstore.Transport
+	)
 	switch role {
 	case config.RoleAdmin:
 		cfg, err := config.LoadAdmin(home)
@@ -44,23 +47,30 @@ func runSync(ctx context.Context, a *app.App) error {
 			return &ExitError{Code: ExitUsage, Err: err}
 		}
 		remoteURL = cfg.Repo.RemoteHTTPS
+		if remoteURL == "" {
+			return &ExitError{Code: ExitUsage, Err: errors.New("kauket: stored remote URL is empty")}
+		}
+		transport, err = buildAdminSyncTransport(ctx, a, remoteURL)
+		if err != nil {
+			return &ExitError{Code: ExitSync, Err: err}
+		}
 	case config.RoleClient:
 		cfg, err := config.LoadClient(home)
 		if err != nil {
 			return &ExitError{Code: ExitUsage, Err: err}
 		}
-		remoteURL = cfg.Repo.RemoteHTTPS
+		// Mirror `kauket get`: prefer the SSH remote and authenticate with the
+		// deploy key, so an SSH remote doesn't fall back to go-git's SSH agent.
+		remoteURL = selectClientRemote(cfg)
+		if remoteURL == "" {
+			return &ExitError{Code: ExitUsage, Err: errors.New("kauket: stored remote URL is empty")}
+		}
+		transport, err = buildGetTransport(home, cfg, remoteURL)
+		if err != nil {
+			return &ExitError{Code: ExitSync, Err: err}
+		}
 	default:
 		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: no kauket store configured here; run 'kauket init' or 'kauket enroll' first")}
-	}
-
-	if remoteURL == "" {
-		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: stored remote URL is empty")}
-	}
-
-	transport, err := buildSyncTransport(ctx, a, remoteURL, role)
-	if err != nil {
-		return &ExitError{Code: ExitSync, Err: err}
 	}
 
 	newStore := a.NewStore
@@ -85,24 +95,21 @@ func runSync(ctx context.Context, a *app.App) error {
 	return nil
 }
 
-func buildSyncTransport(ctx context.Context, a *app.App, remoteURL string, role config.Role) (gitstore.Transport, error) {
+func buildAdminSyncTransport(ctx context.Context, a *app.App, remoteURL string) (gitstore.Transport, error) {
 	if strings.HasPrefix(remoteURL, "file://") {
 		return gitstore.FileURLTransport{}, nil
 	}
-	if role == config.RoleAdmin {
-		token, _, err := githubauth.Select(ctx, []string{"repo"}, githubauth.SelectorOptions{
-			Shell:           a.AuthShell,
-			ClientID:        githubauth.ClientID,
-			HTTPClient:      a.HTTPClient,
-			AllowDeviceFlow: true,
-			PrintCode: func(verifyURL, userCode string) {
-				a.UI.Println(fmt.Sprintf("open %s and enter code %s", verifyURL, userCode))
-			},
-		})
-		if err != nil {
-			return nil, err
-		}
-		return gitstore.HTTPSTokenTransport{Token: token}, nil
+	token, _, err := githubauth.Select(ctx, []string{"repo"}, githubauth.SelectorOptions{
+		Shell:           a.AuthShell,
+		ClientID:        githubauth.ClientID,
+		HTTPClient:      a.HTTPClient,
+		AllowDeviceFlow: true,
+		PrintCode: func(verifyURL, userCode string) {
+			a.UI.Println(fmt.Sprintf("open %s and enter code %s", verifyURL, userCode))
+		},
+	})
+	if err != nil {
+		return nil, err
 	}
-	return gitstore.SelectTransport(remoteURL, ""), nil
+	return gitstore.HTTPSTokenTransport{Token: token}, nil
 }
