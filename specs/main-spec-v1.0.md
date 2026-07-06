@@ -396,6 +396,9 @@ kauket rotate
 kauket rebuild-bundles
 ```
 
+The `kauket get --inspect` and `kauket get --as-host` flags are admin-only read
+paths (see §6.6) and are refused with a usage error under the client role.
+
 If a client later runs `kauket init`, Kauket must not silently convert the machine into an admin. It must either initialize a new store in a clean `KAUKET_HOME`, or fail with a clear message unless an explicit future `promote-admin` flow is implemented.
 
 ---
@@ -1078,9 +1081,13 @@ Flags:
 --force                overwrite local untracked destination
 --backup               create timestamped backup before overwrite
 --no-sync              do not sync first
+--inspect              admin only: read the secret from the vault and print it to stdout
+--as-host <host-id>    admin only: decrypt the host's bundle with the admin recovery key and print to stdout
 ```
 
 ### Behavior
+
+Client role (default):
 
 ```text
 sync main unless --no-sync
@@ -1092,6 +1099,25 @@ if --stdout, print content only
 else install according to bundle metadata
 write installed state
 ```
+
+### Admin read modes
+
+`--inspect` and `--as-host` are admin-only, read-only, print-to-stdout paths. They
+expose no new capability: the admin already holds the vault recipients and is a
+recovery recipient on every host bundle. They only ever print; they never install
+and never write installed state. Both reject `--stdout`, `--force`, and `--backup`,
+and cannot be combined with each other.
+
+`--inspect` reads from `admin/vault.age` (decrypted with the admin identity) and
+prints the value of any secret defined in the vault — the admin's source-of-truth
+view. Missing secret id exits `not-granted` with `secret <id> is not defined in the vault`.
+
+`--as-host <host-id>` reads `bundles/<host-id>.age`, decrypts it with the admin
+recovery key, and prints the secret as that host would receive it — i.e. with the
+host's grants applied. This verifies the approve/rebuild pipeline end to end. A
+missing bundle exits `not-granted` with `no bundle found for host <host-id>`; a
+secret absent from the bundle exits `not-granted` with `secret <id> is not granted
+to host <host-id>`.
 
 ### Required output
 

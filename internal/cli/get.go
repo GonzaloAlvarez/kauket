@@ -21,10 +21,12 @@ import (
 )
 
 type getFlags struct {
-	stdout bool
-	force  bool
-	backup bool
-	noSync bool
+	stdout  bool
+	force   bool
+	backup  bool
+	noSync  bool
+	inspect bool
+	asHost  string
 }
 
 func NewGet(a *app.App) *cobra.Command {
@@ -41,6 +43,8 @@ func NewGet(a *app.App) *cobra.Command {
 	cmd.Flags().BoolVar(&f.force, "force", false, "overwrite an unmanaged destination file")
 	cmd.Flags().BoolVar(&f.backup, "backup", false, "create a timestamped backup before overwriting")
 	cmd.Flags().BoolVar(&f.noSync, "no-sync", false, "skip the sync step")
+	cmd.Flags().BoolVar(&f.inspect, "inspect", false, "admin only: decrypt the secret from the vault and print it to stdout")
+	cmd.Flags().StringVar(&f.asHost, "as-host", "", "admin only: decrypt the given host's bundle with the admin recovery key and print the secret to stdout")
 	return cmd
 }
 
@@ -51,6 +55,19 @@ func runGet(ctx context.Context, a *app.App, f *getFlags, secretID string) error
 	home, err := resolveHome(a)
 	if err != nil {
 		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("kauket: resolve home: %w", err)}
+	}
+
+	if f.inspect || f.asHost != "" {
+		if f.force || f.backup || f.stdout {
+			return &ExitError{Code: ExitUsage, Err: errors.New("kauket: --inspect and --as-host cannot be combined with --stdout, --force, or --backup")}
+		}
+		if f.inspect && f.asHost != "" {
+			return &ExitError{Code: ExitUsage, Err: errors.New("kauket: --inspect and --as-host cannot be combined")}
+		}
+		if f.inspect {
+			return runInspect(ctx, a, f, secretID, home)
+		}
+		return runInspectHost(ctx, a, f, secretID, f.asHost, home)
 	}
 
 	cfg, err := config.LoadClient(home)
@@ -141,6 +158,147 @@ func runGetSync(ctx context.Context, a *app.App, home string, cfg *config.Client
 	if !stdoutMode {
 		a.UI.Println("syncing store")
 	}
+	if err := store.Sync(ctx); err != nil {
+		return &ExitError{Code: ExitSync, Err: err}
+	}
+	return nil
+}
+
+// runInspect implements `kauket get --inspect`: an admin-only path that reads a
+// secret's plaintext straight from the admin vault and prints it to stdout. The
+// admin holds the vault recipients, so no host identity or bundle is involved.
+func runInspect(ctx context.Context, a *app.App, f *getFlags, secretID, home string) error {
+	cfg, err := loadAdminForRead(home, "--inspect")
+	if err != nil {
+		return err
+	}
+
+	if !f.noSync {
+		if err := runInspectSync(ctx, a, home, cfg); err != nil {
+			return err
+		}
+	}
+
+	vaultPath := filepath.Join(config.RepoDir(home), "admin", "vault.age")
+	ct, err := os.ReadFile(vaultPath)
+	if err != nil {
+		return &ExitError{Code: ExitSync, Err: fmt.Errorf("kauket: read admin vault: %w", err)}
+	}
+
+	vault, err := bundle.DecodeVault(ct, agebox.FileIdentityProvider{Path: adminIdentityPath(cfg, home)})
+	if err != nil {
+		return &ExitError{Code: ExitCrypto, Err: fmt.Errorf("kauket: decrypt admin vault: %w", err)}
+	}
+
+	secret, ok := vault.Secrets[secretID]
+	if !ok {
+		return &ExitError{Code: ExitNotGranted, Err: fmt.Errorf("secret %s is not defined in the vault", secretID)}
+	}
+	return writeSecretStdout(secret.ContentBase64)
+}
+
+// runInspectHost implements `kauket get --as-host <host-id>`: an admin-only path
+// that decrypts a specific host's bundle with the admin recovery key and prints
+// the secret to stdout. Unlike --inspect (which reads the whole vault), this
+// shows exactly what that host will receive, with its grants applied.
+func runInspectHost(ctx context.Context, a *app.App, f *getFlags, secretID, hostID, home string) error {
+	cfg, err := loadAdminForRead(home, "--as-host")
+	if err != nil {
+		return err
+	}
+
+	if !f.noSync {
+		if err := runInspectSync(ctx, a, home, cfg); err != nil {
+			return err
+		}
+	}
+
+	bundlePath := filepath.Join(config.RepoDir(home), "bundles", hostID+".age")
+	ct, err := os.ReadFile(bundlePath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return &ExitError{Code: ExitNotGranted, Err: fmt.Errorf("no bundle found for host %s", hostID)}
+		}
+		return &ExitError{Code: ExitSync, Err: fmt.Errorf("kauket: read bundle: %w", err)}
+	}
+
+	b, err := bundle.DecodeHostBundle(ct, agebox.FileIdentityProvider{Path: adminIdentityPath(cfg, home)})
+	if err != nil {
+		return &ExitError{Code: ExitCrypto, Err: fmt.Errorf("kauket: decrypt bundle for host %s: %w", hostID, err)}
+	}
+
+	secret, ok := b.Secrets[secretID]
+	if !ok {
+		return &ExitError{Code: ExitNotGranted, Err: fmt.Errorf("secret %s is not granted to host %s", secretID, hostID)}
+	}
+	return writeSecretStdout(secret.ContentBase64)
+}
+
+// loadAdminForRead loads the admin config for a read-only inspect path, mapping
+// config errors to usage errors that name the flag being used.
+func loadAdminForRead(home, flag string) (*config.Admin, error) {
+	cfg, err := config.LoadAdmin(home)
+	if err != nil {
+		if errors.Is(err, config.ErrNoConfig) {
+			return nil, &ExitError{Code: ExitUsage, Err: errors.New("kauket: no kauket store configured here; run 'kauket init' first")}
+		}
+		if errors.Is(err, config.ErrNotAdmin) {
+			return nil, &ExitError{Code: ExitUsage, Err: fmt.Errorf("kauket: kauket get %s requires admin role", flag)}
+		}
+		return nil, &ExitError{Code: ExitUsage, Err: err}
+	}
+	return cfg, nil
+}
+
+func adminIdentityPath(cfg *config.Admin, home string) string {
+	p := cfg.Admin.IdentityPath
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(home, p)
+	}
+	return p
+}
+
+func writeSecretStdout(contentBase64 string) error {
+	content, err := base64.StdEncoding.DecodeString(contentBase64)
+	if err != nil {
+		return &ExitError{Code: ExitCrypto, Err: fmt.Errorf("kauket: decode secret content: %w", err)}
+	}
+	if _, err := os.Stdout.Write(content); err != nil {
+		return &ExitError{Code: ExitInstall, Err: fmt.Errorf("kauket: write stdout: %w", err)}
+	}
+	return nil
+}
+
+func runInspectSync(ctx context.Context, a *app.App, home string, cfg *config.Admin) error {
+	remoteURL := cfg.Repo.RemoteHTTPS
+	if remoteURL == "" {
+		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: stored remote URL is empty")}
+	}
+
+	transport, err := buildAdminSyncTransport(ctx, a, remoteURL)
+	if err != nil {
+		return &ExitError{Code: ExitSync, Err: err}
+	}
+
+	now := a.Now
+	if now == nil {
+		now = time.Now
+	}
+	newStore := a.NewStore
+	if newStore == nil {
+		newStore = gitstore.OpenOrClone
+	}
+	store, err := newStore(ctx, gitstore.Config{
+		RepoPath: config.RepoDir(home),
+		URL:      remoteURL,
+		LockPath: config.LockPath(home),
+		Now:      now,
+	}, transport)
+	if err != nil {
+		return &ExitError{Code: ExitSync, Err: err}
+	}
+	defer store.Close()
+
 	if err := store.Sync(ctx); err != nil {
 		return &ExitError{Code: ExitSync, Err: err}
 	}

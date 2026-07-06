@@ -524,3 +524,189 @@ func TestGetSymlinkRefused(t *testing.T) {
 		t.Fatalf("symlink target should not be created; got err %v", err)
 	}
 }
+
+func TestGetInspectPrintsVaultSecret(t *testing.T) {
+	a, fake, _ := initAdminFixture(t)
+	keyPath := writeSSHKeyFixture(t)
+	if err := runAdd(context.Background(), a, &addFlags{}, "ssh.main_private_key", keyPath); err != nil {
+		t.Fatalf("runAdd: %v", err)
+	}
+	fake.Lines = nil
+
+	want, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	flags := &getFlags{inspect: true, noSync: true}
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = runGet(context.Background(), a, flags, "ssh.main_private_key")
+	})
+	if runErr != nil {
+		t.Fatalf("runGet --inspect: %v", runErr)
+	}
+	if string(out) != string(want) {
+		t.Fatalf("inspect output mismatch: got %q want %q", string(out), string(want))
+	}
+	for _, line := range fake.Lines {
+		if strings.TrimSpace(line) != "" {
+			t.Fatalf("inspect should not print to stdout via UI: %q", line)
+		}
+	}
+}
+
+func TestGetInspectUnknownSecret(t *testing.T) {
+	a, _, _ := initAdminFixture(t)
+	flags := &getFlags{inspect: true, noSync: true}
+	err := runGet(context.Background(), a, flags, "ssh.does_not_exist")
+	if err == nil {
+		t.Fatalf("expected error for unknown secret")
+	}
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected ExitError, got %T", err)
+	}
+	if exitErr.Code != ExitNotGranted {
+		t.Fatalf("expected ExitNotGranted, got %d", exitErr.Code)
+	}
+}
+
+func TestGetInspectRequiresAdminRole(t *testing.T) {
+	fx := setupClientWithLocalBundle(t)
+	flags := &getFlags{inspect: true, noSync: true}
+	err := runGet(context.Background(), fx.app, flags, testSecretID)
+	if err == nil {
+		t.Fatalf("expected error when client role uses --inspect")
+	}
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected ExitError, got %T", err)
+	}
+	if exitErr.Code != ExitUsage {
+		t.Fatalf("expected ExitUsage, got %d", exitErr.Code)
+	}
+	if !strings.Contains(err.Error(), "admin role") {
+		t.Fatalf("expected 'admin role' in error, got %q", err.Error())
+	}
+}
+
+func TestGetInspectRejectsInstallFlags(t *testing.T) {
+	a, _, _ := initAdminFixture(t)
+	flags := &getFlags{inspect: true, noSync: true, stdout: true}
+	err := runGet(context.Background(), a, flags, "ssh.main_private_key")
+	if err == nil {
+		t.Fatalf("expected error combining --inspect with --stdout")
+	}
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected ExitError, got %T", err)
+	}
+	if exitErr.Code != ExitUsage {
+		t.Fatalf("expected ExitUsage, got %d", exitErr.Code)
+	}
+}
+
+func setupAdminWithGrantedHost(t *testing.T) (*app.App, string, string) {
+	t.Helper()
+	a, fake, home := initAdminFixture(t)
+	hostID := "h_aaaaaaaaaaaaaaaa"
+	addHostGrant(t, home, hostID, "test-host", []string{"ssh"}, nil)
+	keyPath := writeSSHKeyFixture(t)
+	if err := runAdd(context.Background(), a, &addFlags{}, "ssh.main_private_key", keyPath); err != nil {
+		t.Fatalf("runAdd: %v", err)
+	}
+	fake.Lines = nil
+	return a, home, hostID
+}
+
+func TestGetAsHostPrintsBundleSecret(t *testing.T) {
+	a, _, hostID := setupAdminWithGrantedHost(t)
+
+	want := []byte("-----BEGIN OPENSSH PRIVATE KEY-----\nKAUKETTESTFAKEKEYDATA1234567890abcdefABCDEFghIJKL=\n-----END OPENSSH PRIVATE KEY-----\n")
+
+	flags := &getFlags{asHost: hostID, noSync: true}
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = runGet(context.Background(), a, flags, "ssh.main_private_key")
+	})
+	if runErr != nil {
+		t.Fatalf("runGet --as-host: %v", runErr)
+	}
+	if string(out) != string(want) {
+		t.Fatalf("as-host output mismatch: got %q want %q", string(out), string(want))
+	}
+}
+
+func TestGetAsHostSecretNotGranted(t *testing.T) {
+	a, _, hostID := setupAdminWithGrantedHost(t)
+	flags := &getFlags{asHost: hostID, noSync: true}
+	err := runGet(context.Background(), a, flags, "ssh.absent")
+	if err == nil {
+		t.Fatalf("expected error for secret not in host bundle")
+	}
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected ExitError, got %T", err)
+	}
+	if exitErr.Code != ExitNotGranted {
+		t.Fatalf("expected ExitNotGranted, got %d", exitErr.Code)
+	}
+	if !strings.Contains(err.Error(), "not granted to host") {
+		t.Fatalf("expected 'not granted to host' in error, got %q", err.Error())
+	}
+}
+
+func TestGetAsHostUnknownHost(t *testing.T) {
+	a, _, _ := initAdminFixture(t)
+	flags := &getFlags{asHost: "h_doesnotexist000", noSync: true}
+	err := runGet(context.Background(), a, flags, "ssh.main_private_key")
+	if err == nil {
+		t.Fatalf("expected error for unknown host")
+	}
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected ExitError, got %T", err)
+	}
+	if exitErr.Code != ExitNotGranted {
+		t.Fatalf("expected ExitNotGranted, got %d", exitErr.Code)
+	}
+	if !strings.Contains(err.Error(), "no bundle found for host") {
+		t.Fatalf("expected 'no bundle found for host' in error, got %q", err.Error())
+	}
+}
+
+func TestGetAsHostRequiresAdminRole(t *testing.T) {
+	fx := setupClientWithLocalBundle(t)
+	flags := &getFlags{asHost: "h_whatever00000000", noSync: true}
+	err := runGet(context.Background(), fx.app, flags, testSecretID)
+	if err == nil {
+		t.Fatalf("expected error when client role uses --as-host")
+	}
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected ExitError, got %T", err)
+	}
+	if exitErr.Code != ExitUsage {
+		t.Fatalf("expected ExitUsage, got %d", exitErr.Code)
+	}
+	if !strings.Contains(err.Error(), "admin role") {
+		t.Fatalf("expected 'admin role' in error, got %q", err.Error())
+	}
+}
+
+func TestGetInspectAndAsHostConflict(t *testing.T) {
+	a, _, _ := initAdminFixture(t)
+	flags := &getFlags{inspect: true, asHost: "h_aaaaaaaaaaaaaaaa", noSync: true}
+	err := runGet(context.Background(), a, flags, "ssh.main_private_key")
+	if err == nil {
+		t.Fatalf("expected error combining --inspect with --as-host")
+	}
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected ExitError, got %T", err)
+	}
+	if exitErr.Code != ExitUsage {
+		t.Fatalf("expected ExitUsage, got %d", exitErr.Code)
+	}
+}
