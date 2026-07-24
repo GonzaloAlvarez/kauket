@@ -59,8 +59,6 @@ func runSync(ctx context.Context, a *app.App) error {
 		if err != nil {
 			return &ExitError{Code: ExitUsage, Err: err}
 		}
-		// Mirror `kauket get`: prefer the SSH remote and authenticate with the
-		// deploy key, so an SSH remote doesn't fall back to go-git's SSH agent.
 		remoteURL = selectClientRemote(cfg)
 		if remoteURL == "" {
 			return &ExitError{Code: ExitUsage, Err: errors.New("kauket: stored remote URL is empty")}

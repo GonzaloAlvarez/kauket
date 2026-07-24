@@ -38,10 +38,6 @@ func TestSyncAdminAfterInit(t *testing.T) {
 	}
 }
 
-// TestClientSyncUsesSSHDeployKeyTransport guards the regression where
-// `kauket sync` ignored the client's SSH remote and deploy key, causing go-git
-// to fall back to the SSH agent ("SSH_AUTH_SOCK not-specified"). The client sync
-// path must resolve the remote and transport exactly like `kauket get`.
 func TestClientSyncUsesSSHDeployKeyTransport(t *testing.T) {
 	home := t.TempDir()
 	keyPath := filepath.Join(home, "git", "deploy_key")

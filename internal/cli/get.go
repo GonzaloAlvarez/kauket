@@ -164,9 +164,6 @@ func runGetSync(ctx context.Context, a *app.App, home string, cfg *config.Client
 	return nil
 }
 
-// runInspect implements `kauket get --inspect`: an admin-only path that reads a
-// secret's plaintext straight from the admin vault and prints it to stdout. The
-// admin holds the vault recipients, so no host identity or bundle is involved.
 func runInspect(ctx context.Context, a *app.App, f *getFlags, secretID, home string) error {
 	cfg, err := loadAdminForRead(home, "--inspect")
 	if err != nil {
@@ -197,10 +194,6 @@ func runInspect(ctx context.Context, a *app.App, f *getFlags, secretID, home str
 	return writeSecretStdout(secret.ContentBase64)
 }
 
-// runInspectHost implements `kauket get --as-host <host-id>`: an admin-only path
-// that decrypts a specific host's bundle with the admin recovery key and prints
-// the secret to stdout. Unlike --inspect (which reads the whole vault), this
-// shows exactly what that host will receive, with its grants applied.
 func runInspectHost(ctx context.Context, a *app.App, f *getFlags, secretID, hostID, home string) error {
 	cfg, err := loadAdminForRead(home, "--as-host")
 	if err != nil {
@@ -234,8 +227,6 @@ func runInspectHost(ctx context.Context, a *app.App, f *getFlags, secretID, host
 	return writeSecretStdout(secret.ContentBase64)
 }
 
-// loadAdminForRead loads the admin config for a read-only inspect path, mapping
-// config errors to usage errors that name the flag being used.
 func loadAdminForRead(home, flag string) (*config.Admin, error) {
 	cfg, err := config.LoadAdmin(home)
 	if err != nil {
