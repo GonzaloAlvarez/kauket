@@ -120,6 +120,7 @@ func runInit(ctx context.Context, a *app.App, f *initFlags) error {
 		tok, _, authErr := githubauth.Select(ctx, []string{"repo", "admin:public_key"}, githubauth.SelectorOptions{
 			Shell:           a.AuthShell,
 			ClientID:        githubauth.ClientID,
+			Account:         f.owner,
 			PrintCode:       printCode,
 			HTTPClient:      a.HTTPClient,
 			AllowDeviceFlow: true,

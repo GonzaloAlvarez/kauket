@@ -50,7 +50,7 @@ func runSync(ctx context.Context, a *app.App) error {
 		if remoteURL == "" {
 			return &ExitError{Code: ExitUsage, Err: errors.New("kauket: stored remote URL is empty")}
 		}
-		transport, err = buildAdminSyncTransport(ctx, a, remoteURL)
+		transport, err = buildAdminSyncTransport(ctx, a, remoteURL, cfg.Repo.Owner)
 		if err != nil {
 			return &ExitError{Code: ExitSync, Err: err}
 		}
@@ -95,13 +95,14 @@ func runSync(ctx context.Context, a *app.App) error {
 	return nil
 }
 
-func buildAdminSyncTransport(ctx context.Context, a *app.App, remoteURL string) (gitstore.Transport, error) {
+func buildAdminSyncTransport(ctx context.Context, a *app.App, remoteURL, account string) (gitstore.Transport, error) {
 	if strings.HasPrefix(remoteURL, "file://") {
 		return gitstore.FileURLTransport{}, nil
 	}
 	token, _, err := githubauth.Select(ctx, []string{"repo"}, githubauth.SelectorOptions{
 		Shell:           a.AuthShell,
 		ClientID:        githubauth.ClientID,
+		Account:         account,
 		HTTPClient:      a.HTTPClient,
 		AllowDeviceFlow: true,
 		PrintCode: func(verifyURL, userCode string) {

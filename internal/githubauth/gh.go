@@ -9,10 +9,18 @@ import (
 	"io/fs"
 	"os/exec"
 	"strings"
+	"time"
+)
+
+const (
+	ghHost           = "github.com"
+	defaultGHTimeout = 10 * time.Second
 )
 
 type GHCLIProvider struct {
-	Shell Shell
+	Shell   Shell
+	Account string
+	Timeout time.Duration
 }
 
 func (p *GHCLIProvider) shell() Shell {
@@ -20,6 +28,23 @@ func (p *GHCLIProvider) shell() Shell {
 		return SystemShell{}
 	}
 	return p.Shell
+}
+
+func (p *GHCLIProvider) timeout() time.Duration {
+	if p.Timeout > 0 {
+		return p.Timeout
+	}
+	return defaultGHTimeout
+}
+
+func (p *GHCLIProvider) run(ctx context.Context, sh Shell, args ...string) ([]byte, []byte, error) {
+	runCtx, cancel := context.WithTimeout(ctx, p.timeout())
+	defer cancel()
+	stdout, stderr, err := sh.Run(runCtx, "gh", args...)
+	if err != nil && errors.Is(runCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+		return stdout, stderr, fmt.Errorf("%w: %q gave no answer within %s; ensure your internet connectivity is working", ErrGHTimeout, "gh "+strings.Join(args, " "), p.timeout())
+	}
+	return stdout, stderr, err
 }
 
 func (p *GHCLIProvider) Token(ctx context.Context, scopes []string) (string, error) {
@@ -31,26 +56,37 @@ func (p *GHCLIProvider) Token(ctx context.Context, scopes []string) (string, err
 		return "", ErrGHNotInstalled
 	}
 
-	stdout, stderr, runErr := sh.Run(ctx, "gh", "auth", "status")
+	stdout, stderr, runErr := p.run(ctx, sh, "auth", "status", "--hostname", ghHost)
+	if errors.Is(runErr, ErrGHTimeout) {
+		return "", runErr
+	}
 	combined := append(append([]byte{}, stdout...), stderr...)
 	if runErr != nil {
 		return "", ErrGHNotAuthenticated
 	}
 
-	loggedIn, presentScopes, parseErr := parseAuthStatus(combined)
+	accounts, parseErr := parseAuthStatus(combined, ghHost)
 	if parseErr != nil {
 		return "", fmt.Errorf("%w: failed to parse gh auth status output", ErrGHNotAuthenticated)
 	}
-	if !loggedIn {
+	account, ok := chooseAccount(accounts, p.Account)
+	if !ok {
 		return "", ErrGHNotAuthenticated
 	}
 
-	missing := missingScopes(presentScopes, scopes)
+	missing := missingScopes(account.Scopes, scopes)
 	if len(missing) > 0 {
 		return "", &InsufficientScopesError{Missing: missing}
 	}
 
-	tokenOut, _, tokenRunErr := sh.Run(ctx, "gh", "auth", "token")
+	tokenArgs := []string{"auth", "token", "--hostname", ghHost}
+	if account.Name != "" {
+		tokenArgs = append(tokenArgs, "--user", account.Name)
+	}
+	tokenOut, _, tokenRunErr := p.run(ctx, sh, tokenArgs...)
+	if errors.Is(tokenRunErr, ErrGHTimeout) {
+		return "", tokenRunErr
+	}
 	if tokenRunErr != nil {
 		return "", fmt.Errorf("kauket: gh auth token failed: %w", tokenRunErr)
 	}
@@ -61,24 +97,25 @@ func (p *GHCLIProvider) Token(ctx context.Context, scopes []string) (string, err
 	return tok, nil
 }
 
-func parseAuthStatus(out []byte) (loggedIn bool, scopes []string, err error) {
+type ghAccount struct {
+	Name   string
+	Active bool
+	Scopes []string
+}
+
+func parseAuthStatus(out []byte, host string) ([]ghAccount, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(out))
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
-	var inGitHubHost bool
-	var inActiveAccount bool
-	var currentAccountIsActive bool
-	var currentAccountScopes []string
-	var activeScopes []string
-	activeFound := false
+	var accounts []ghAccount
+	var inHost bool
+	var current *ghAccount
 
-	flushAccount := func() {
-		if currentAccountIsActive {
-			activeScopes = currentAccountScopes
-			activeFound = true
+	flush := func() {
+		if current != nil {
+			accounts = append(accounts, *current)
 		}
-		currentAccountIsActive = false
-		currentAccountScopes = nil
+		current = nil
 	}
 
 	for scanner.Scan() {
@@ -89,46 +126,69 @@ func parseAuthStatus(out []byte) (loggedIn bool, scopes []string, err error) {
 		}
 
 		if !strings.HasPrefix(raw, " ") && !strings.HasPrefix(raw, "\t") {
-			flushAccount()
-			inGitHubHost = strings.EqualFold(trimmed, "github.com")
-			inActiveAccount = false
+			flush()
+			inHost = strings.EqualFold(trimmed, host)
 			continue
 		}
-		if !inGitHubHost {
+		if !inHost {
 			continue
 		}
 
-		if strings.Contains(trimmed, "Logged in to github.com") {
-			flushAccount()
-			loggedIn = true
-			inActiveAccount = true
+		if strings.Contains(trimmed, "Logged in to "+host) {
+			flush()
+			current = &ghAccount{Name: accountName(trimmed)}
 			continue
 		}
-		if !inActiveAccount {
+		if current == nil {
 			continue
 		}
 
 		if v, ok := matchKey(trimmed, "Active account"); ok {
-			currentAccountIsActive = strings.EqualFold(strings.TrimSpace(v), "true")
+			current.Active = strings.EqualFold(strings.TrimSpace(v), "true")
 			continue
 		}
 		if v, ok := matchKey(trimmed, "Token scopes"); ok {
-			currentAccountScopes = parseScopes(v)
+			current.Scopes = parseScopes(v)
 			continue
 		}
 	}
 	if scanErr := scanner.Err(); scanErr != nil {
-		return false, nil, scanErr
+		return nil, scanErr
 	}
-	flushAccount()
+	flush()
+	return accounts, nil
+}
 
-	if !loggedIn {
-		return false, nil, nil
+func accountName(line string) string {
+	const marker = " account "
+	idx := strings.Index(line, marker)
+	if idx < 0 {
+		return ""
 	}
-	if activeFound {
-		return true, activeScopes, nil
+	fields := strings.Fields(line[idx+len(marker):])
+	if len(fields) == 0 {
+		return ""
 	}
-	return true, nil, nil
+	return fields[0]
+}
+
+func chooseAccount(accounts []ghAccount, preferred string) (ghAccount, bool) {
+	if preferred != "" {
+		for _, a := range accounts {
+			if strings.EqualFold(a.Name, preferred) {
+				return a, true
+			}
+		}
+	}
+	for _, a := range accounts {
+		if a.Active {
+			return a, true
+		}
+	}
+	if len(accounts) > 0 {
+		return accounts[0], true
+	}
+	return ghAccount{}, false
 }
 
 func matchKey(line, key string) (string, bool) {

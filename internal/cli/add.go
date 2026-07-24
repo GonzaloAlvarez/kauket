@@ -133,7 +133,7 @@ func runAdd(ctx context.Context, a *app.App, f *addFlags, secretID, sourcePath s
 		profileList = []string{inferred}
 	}
 
-	transport, err := buildAdminSyncTransport(ctx, a, cfg.Repo.RemoteHTTPS)
+	transport, err := buildAdminSyncTransport(ctx, a, cfg.Repo.RemoteHTTPS, cfg.Repo.Owner)
 	if err != nil {
 		return &ExitError{Code: ExitSync, Err: err}
 	}

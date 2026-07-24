@@ -3,6 +3,7 @@ package githubauth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -190,6 +191,47 @@ func TestSelectBothProvidersFailReturnsCombinedError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "device flow") {
 		t.Fatalf("expected device flow mention")
+	}
+}
+
+func TestSelectFallsThroughOnGHTimeout(t *testing.T) {
+	const tok = "FAKE_DEVICE_TOKEN_4_zzzzzzzzzzzzzzzzzzzzzzz"
+	gh := providerFn(func(ctx context.Context, scopes []string) (string, error) {
+		return "", fmt.Errorf("%w: gh auth status gave no answer", ErrGHTimeout)
+	})
+	dev := providerFn(func(ctx context.Context, scopes []string) (string, error) {
+		return tok, nil
+	})
+	out, name, err := Select(context.Background(), []string{"repo"}, SelectorOptions{
+		GHProvider:      gh,
+		DeviceProvider:  dev,
+		AllowDeviceFlow: true,
+	})
+	if err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	if name != "device" || out != tok {
+		t.Fatalf("unexpected: name=%q tok=%q", name, out)
+	}
+}
+
+func TestSelectGHTimeoutAndDeviceFailureMentionsConnectivity(t *testing.T) {
+	gh := providerFn(func(ctx context.Context, scopes []string) (string, error) {
+		return "", fmt.Errorf("%w: gh auth status gave no answer", ErrGHTimeout)
+	})
+	dev := providerFn(func(ctx context.Context, scopes []string) (string, error) {
+		return "", errors.New("kauket: device flow request failed")
+	})
+	_, _, err := Select(context.Background(), []string{"repo"}, SelectorOptions{
+		GHProvider:      gh,
+		DeviceProvider:  dev,
+		AllowDeviceFlow: true,
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if !strings.Contains(err.Error(), "internet connectivity") {
+		t.Fatalf("expected connectivity hint, got: %v", err)
 	}
 }
 

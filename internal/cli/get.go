@@ -275,7 +275,7 @@ func runInspectSync(ctx context.Context, a *app.App, home string, cfg *config.Ad
 		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: stored remote URL is empty")}
 	}
 
-	transport, err := buildAdminSyncTransport(ctx, a, remoteURL)
+	transport, err := buildAdminSyncTransport(ctx, a, remoteURL, cfg.Repo.Owner)
 	if err != nil {
 		return &ExitError{Code: ExitSync, Err: err}
 	}

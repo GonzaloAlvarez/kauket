@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 )
 
 type SelectorOptions struct {
 	Shell           Shell
 	ClientID        string
+	Account         string
+	GHTimeout       time.Duration
 	PrintCode       func(verifyURL, userCode string)
 	HTTPClient      *http.Client
 	Endpoints       *DeviceEndpoints
@@ -21,7 +24,7 @@ type SelectorOptions struct {
 func Select(ctx context.Context, scopes []string, opts SelectorOptions) (string, string, error) {
 	ghProvider := opts.GHProvider
 	if ghProvider == nil {
-		ghProvider = &GHCLIProvider{Shell: opts.Shell}
+		ghProvider = &GHCLIProvider{Shell: opts.Shell, Account: opts.Account, Timeout: opts.GHTimeout}
 	}
 
 	token, ghErr := ghProvider.Token(ctx, scopes)
@@ -31,7 +34,8 @@ func Select(ctx context.Context, scopes []string, opts SelectorOptions) (string,
 
 	fallback := errors.Is(ghErr, ErrGHNotInstalled) ||
 		errors.Is(ghErr, ErrGHNotAuthenticated) ||
-		errors.Is(ghErr, ErrInsufficientScopes)
+		errors.Is(ghErr, ErrInsufficientScopes) ||
+		errors.Is(ghErr, ErrGHTimeout)
 
 	if !fallback {
 		return "", "", fmt.Errorf("kauket: GitHub authentication via gh failed: %w", ghErr)
@@ -58,6 +62,9 @@ func Select(ctx context.Context, scopes []string, opts SelectorOptions) (string,
 	token, devErr := deviceProvider.Token(ctx, scopes)
 	if devErr == nil {
 		return token, "device", nil
+	}
+	if errors.Is(ghErr, ErrGHTimeout) {
+		return "", "", fmt.Errorf("kauket: GitHub authentication failed: gh timed out and the device flow did not complete; ensure your internet connectivity is working; gh error: %v; device flow error: %w", ghErr, devErr)
 	}
 	return "", "", fmt.Errorf("kauket: GitHub authentication required; run 'gh auth login' (recommended) or complete the device flow when prompted; gh provider error: %v; device flow error: %w", ghErr, devErr)
 }

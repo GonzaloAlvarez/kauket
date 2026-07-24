@@ -10,6 +10,7 @@ import (
 var (
 	ErrGHNotInstalled     = errors.New("kauket: gh is not installed")
 	ErrGHNotAuthenticated = errors.New("kauket: gh is not authenticated to github.com")
+	ErrGHTimeout          = errors.New("kauket: gh timed out")
 )
 
 type InsufficientScopesError struct {

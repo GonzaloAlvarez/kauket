@@ -86,6 +86,7 @@ func runApprove(ctx context.Context, a *app.App, f *approveFlags) error {
 		tok, _, authErr := githubauth.Select(ctx, []string{"repo", "admin:public_key"}, githubauth.SelectorOptions{
 			Shell:           a.AuthShell,
 			ClientID:        githubauth.ClientID,
+			Account:         cfg.Repo.Owner,
 			PrintCode:       printCode,
 			HTTPClient:      a.HTTPClient,
 			AllowDeviceFlow: true,
