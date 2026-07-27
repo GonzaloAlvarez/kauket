@@ -59,20 +59,12 @@ func runEnroll(ctx context.Context, a *app.App, f *enrollFlags) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	home, err := resolveHome(a)
+	home, exists, err := resolveRoleHome(a, config.RoleClient)
 	if err != nil {
 		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("kauket: resolve home: %w", err)}
 	}
-
-	role, err := config.PeekRole(home)
-	if err != nil {
-		return &ExitError{Code: ExitUsage, Err: err}
-	}
-	if role == config.RoleAdmin {
-		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: this machine is configured as admin; enroll is for new client machines")}
-	}
-	if role == config.RoleClient {
-		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: already enrolled; remove KAUKET_HOME to re-enroll")}
+	if exists {
+		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("kauket: already enrolled; remove %s to re-enroll", home)}
 	}
 
 	if len(f.requests) == 0 {

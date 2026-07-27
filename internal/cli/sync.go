@@ -14,63 +14,81 @@ import (
 )
 
 func NewSync(a *app.App) *cobra.Command {
-	return &cobra.Command{
+	var roleFlag string
+	cmd := &cobra.Command{
 		Use:   "sync",
 		Short: "Sync the local kauket store with the remote",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSync(cmd.Context(), a)
+			return runSync(cmd.Context(), a, roleFlag)
 		},
 	}
+	cmd.Flags().StringVar(&roleFlag, "role", "", "limit to one role (admin|client)")
+	return cmd
 }
 
-func runSync(ctx context.Context, a *app.App) error {
+func runSync(ctx context.Context, a *app.App, roleFlag string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	home, err := resolveHome(a)
+	targets, err := resolveTargetRoles(a, roleFlag)
 	if err != nil {
-		return &ExitError{Code: ExitUsage, Err: err}
+		return err
 	}
-	role, err := config.PeekRole(home)
-	if err != nil {
-		return &ExitError{Code: ExitUsage, Err: err}
-	}
-
-	var (
-		remoteURL string
-		transport gitstore.Transport
-	)
-	switch role {
-	case config.RoleAdmin:
-		cfg, err := config.LoadAdmin(home)
-		if err != nil {
-			return &ExitError{Code: ExitUsage, Err: err}
-		}
-		remoteURL = cfg.Repo.RemoteHTTPS
-		if remoteURL == "" {
-			return &ExitError{Code: ExitUsage, Err: errors.New("kauket: stored remote URL is empty")}
-		}
-		transport, err = buildAdminSyncTransport(ctx, a, remoteURL, cfg.Repo.Owner)
-		if err != nil {
-			return &ExitError{Code: ExitSync, Err: err}
-		}
-	case config.RoleClient:
-		cfg, err := config.LoadClient(home)
-		if err != nil {
-			return &ExitError{Code: ExitUsage, Err: err}
-		}
-		remoteURL = selectClientRemote(cfg)
-		if remoteURL == "" {
-			return &ExitError{Code: ExitUsage, Err: errors.New("kauket: stored remote URL is empty")}
-		}
-		transport, err = buildGetTransport(home, cfg, remoteURL)
-		if err != nil {
-			return &ExitError{Code: ExitSync, Err: err}
-		}
-	default:
+	if len(targets) == 0 {
 		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: no kauket store configured here; run 'kauket init' or 'kauket enroll' first")}
 	}
+	dual := len(targets) > 1
+	for _, t := range targets {
+		if t.role == config.RoleAdmin {
+			err = syncAdmin(ctx, a, t.home)
+		} else {
+			err = syncClient(ctx, a, t.home)
+		}
+		if err != nil {
+			return err
+		}
+		if dual {
+			a.UI.Println(fmt.Sprintf("synced %s", t.role))
+		} else {
+			a.UI.Println("synced")
+		}
+	}
+	return nil
+}
 
+func syncAdmin(ctx context.Context, a *app.App, home string) error {
+	cfg, err := config.LoadAdmin(home)
+	if err != nil {
+		return &ExitError{Code: ExitUsage, Err: err}
+	}
+	remoteURL := cfg.Repo.RemoteHTTPS
+	if remoteURL == "" {
+		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: stored remote URL is empty")}
+	}
+	transport, err := buildAdminSyncTransport(ctx, a, remoteURL, cfg.Repo.Owner)
+	if err != nil {
+		return &ExitError{Code: ExitSync, Err: err}
+	}
+	return syncOne(ctx, a, home, remoteURL, transport)
+}
+
+func syncClient(ctx context.Context, a *app.App, home string) error {
+	cfg, err := config.LoadClient(home)
+	if err != nil {
+		return &ExitError{Code: ExitUsage, Err: err}
+	}
+	remoteURL := selectClientRemote(cfg)
+	if remoteURL == "" {
+		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: stored remote URL is empty")}
+	}
+	transport, err := buildGetTransport(home, cfg, remoteURL)
+	if err != nil {
+		return &ExitError{Code: ExitSync, Err: err}
+	}
+	return syncOne(ctx, a, home, remoteURL, transport)
+}
+
+func syncOne(ctx context.Context, a *app.App, home, remoteURL string, transport gitstore.Transport) error {
 	newStore := a.NewStore
 	if newStore == nil {
 		newStore = gitstore.OpenOrClone
@@ -89,7 +107,6 @@ func runSync(ctx context.Context, a *app.App) error {
 	if err := store.Sync(ctx); err != nil {
 		return &ExitError{Code: ExitSync, Err: err}
 	}
-	a.UI.Println("synced")
 	return nil
 }
 

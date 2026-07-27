@@ -50,6 +50,7 @@ test "$(stat_mode "$RESOLVED_MACHINE_HOME/.ssh")" = "700"
 test "$(stat_mode "$RESOLVED_MACHINE_HOME/.ssh/main_private_key")" = "600"
 
 echo "=== leak scan ==="
-"$repo_root/scripts/leak-scan.sh" "$ADMIN_HOME/.config/kauket/repo" "ssh.main_private_key" "main_private_key" "machine2" "r730xd" "BEGIN OPENSSH"
+"$repo_root/scripts/leak-scan.sh" "$ADMIN_HOME/.config/kauket/admin/repo" "ssh.main_private_key" "main_private_key" "machine2" "r730xd" "BEGIN OPENSSH"
+"$repo_root/scripts/leak-scan.sh" "$MACHINE_HOME/.config/kauket/client/repo" "ssh.main_private_key" "main_private_key" "machine2" "r730xd" "BEGIN OPENSSH"
 
 echo "=== ALL GREEN ==="

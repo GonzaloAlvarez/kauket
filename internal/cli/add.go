@@ -56,19 +56,13 @@ func runAdd(ctx context.Context, a *app.App, f *addFlags, secretID, sourcePath s
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	home, err := resolveHome(a)
+	home, err := requireRoleHome(a, config.RoleAdmin, "kauket add")
 	if err != nil {
-		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("kauket: resolve home: %w", err)}
+		return err
 	}
 
 	cfg, err := config.LoadAdmin(home)
 	if err != nil {
-		if errors.Is(err, config.ErrNoConfig) {
-			return &ExitError{Code: ExitUsage, Err: errors.New("kauket: no kauket store configured here; run 'kauket init' first")}
-		}
-		if errors.Is(err, config.ErrNotAdmin) {
-			return &ExitError{Code: ExitUsage, Err: errors.New("kauket: kauket add requires admin role")}
-		}
 		return &ExitError{Code: ExitUsage, Err: err}
 	}
 

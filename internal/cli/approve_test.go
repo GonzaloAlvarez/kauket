@@ -49,7 +49,7 @@ func enrollClientHome(t *testing.T, bareURL, name string) (clientHome string, re
 	if requestID == "" {
 		t.Fatalf("could not find request id in enroll output: %v", fake.Lines)
 	}
-	return home, requestID
+	return config.RoleHome(home, config.RoleClient), requestID
 }
 
 func newApproveAdminApp(t *testing.T, home string) (*app.App, *ui.Fake) {
@@ -63,10 +63,10 @@ func newApproveAdminApp(t *testing.T, home string) (*app.App, *ui.Fake) {
 }
 
 func TestApproveSingleRequest(t *testing.T) {
-	adminHome, bareURL := setupAdminStore(t)
+	adminBase, adminHome, bareURL := setupAdminStore(t)
 	clientHome, _ := enrollClientHome(t, bareURL, "machine2")
 
-	adminApp, fake := newApproveAdminApp(t, adminHome)
+	adminApp, fake := newApproveAdminApp(t, adminBase)
 	flags := &approveFlags{all: true, yes: true}
 	if err := runApprove(context.Background(), adminApp, flags); err != nil {
 		t.Fatalf("approve: %v", err)
@@ -184,7 +184,7 @@ func scanForLiteral(t *testing.T, root, needle string) []string {
 }
 
 func TestApproveDryRun(t *testing.T) {
-	adminHome, bareURL := setupAdminStore(t)
+	adminBase, adminHome, bareURL := setupAdminStore(t)
 	clientHome, _ := enrollClientHome(t, bareURL, "machine2")
 
 	bundlesDir := filepath.Join(config.RepoDir(adminHome), "bundles")
@@ -205,7 +205,7 @@ func TestApproveDryRun(t *testing.T) {
 		t.Fatalf("setup: want 1 ref, got %v", refsBefore)
 	}
 
-	adminApp, fake := newApproveAdminApp(t, adminHome)
+	adminApp, fake := newApproveAdminApp(t, adminBase)
 	flags := &approveFlags{all: true, yes: true, dryRun: true}
 	if err := runApprove(context.Background(), adminApp, flags); err != nil {
 		t.Fatalf("approve dry-run: %v", err)
@@ -246,10 +246,10 @@ func TestApproveDryRun(t *testing.T) {
 }
 
 func TestApproveRejectsAlreadyApproved(t *testing.T) {
-	adminHome, bareURL := setupAdminStore(t)
+	adminBase, _, bareURL := setupAdminStore(t)
 	enrollClientHome(t, bareURL, "machine2")
 
-	adminApp, fake := newApproveAdminApp(t, adminHome)
+	adminApp, fake := newApproveAdminApp(t, adminBase)
 	if err := runApprove(context.Background(), adminApp, &approveFlags{all: true, yes: true}); err != nil {
 		t.Fatalf("first approve: %v", err)
 	}
@@ -284,7 +284,7 @@ func TestApproveRejectsAlreadyApproved(t *testing.T) {
 }
 
 func TestApproveRejectsInvalidSignature(t *testing.T) {
-	adminHome, bareURL := setupAdminStore(t)
+	adminBase, adminHome, bareURL := setupAdminStore(t)
 	enrollClientHome(t, bareURL, "machine2")
 
 	refs := collectEnrollRequestRefs(t, bareURL)
@@ -305,7 +305,7 @@ func TestApproveRejectsInvalidSignature(t *testing.T) {
 		t.Fatalf("tamper request: %v", err)
 	}
 
-	adminApp, fake := newApproveAdminApp(t, adminHome)
+	adminApp, fake := newApproveAdminApp(t, adminBase)
 	if err := runApprove(context.Background(), adminApp, &approveFlags{all: true, yes: true}); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
@@ -339,7 +339,7 @@ func TestApproveRejectsInvalidSignature(t *testing.T) {
 }
 
 func TestApproveRejectsMismatchedStoreID(t *testing.T) {
-	adminHome, bareURL := setupAdminStore(t)
+	adminBase, adminHome, bareURL := setupAdminStore(t)
 
 	cfg, err := config.LoadAdmin(adminHome)
 	if err != nil {
@@ -359,7 +359,7 @@ func TestApproveRejectsMismatchedStoreID(t *testing.T) {
 	clientHome, _ := enrollFakeRequest(t, bareURL, adminRecips, "ks_wrongstoreidaaaa")
 	_ = clientHome
 
-	adminApp, fake := newApproveAdminApp(t, adminHome)
+	adminApp, fake := newApproveAdminApp(t, adminBase)
 	if err := runApprove(context.Background(), adminApp, &approveFlags{all: true, yes: true}); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
@@ -383,7 +383,7 @@ func TestApproveRejectsMismatchedStoreID(t *testing.T) {
 }
 
 func TestApproveSpecificRequest(t *testing.T) {
-	adminHome, bareURL := setupAdminStore(t)
+	adminBase, adminHome, bareURL := setupAdminStore(t)
 	clientA, requestA := enrollClientHome(t, bareURL, "machineA")
 	clientB, requestB := enrollClientHome(t, bareURL, "machineB")
 	_ = clientB
@@ -393,7 +393,7 @@ func TestApproveSpecificRequest(t *testing.T) {
 		t.Fatalf("load A: %v", err)
 	}
 
-	adminApp, fake := newApproveAdminApp(t, adminHome)
+	adminApp, fake := newApproveAdminApp(t, adminBase)
 	flags := &approveFlags{request: requestA, yes: true}
 	if err := runApprove(context.Background(), adminApp, flags); err != nil {
 		t.Fatalf("approve: %v", err)

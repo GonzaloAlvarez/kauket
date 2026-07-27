@@ -97,7 +97,7 @@ func TestNegativeWrongHostCannotDecryptBundle(t *testing.T) {
 	}
 
 	m2ID := readHostID(t, m2Kauket)
-	m2BundlePath := filepath.Join(adminKauket, "repo", "bundles", m2ID+".age")
+	m2BundlePath := filepath.Join(roleHomePath(adminKauket, "admin"), "repo", "bundles", m2ID+".age")
 	m2Bundle, err := os.ReadFile(m2BundlePath)
 	if err != nil {
 		t.Fatalf("read m2 bundle from admin repo: %v", err)
@@ -118,7 +118,7 @@ func TestNegativeWrongHostCannotDecryptBundle(t *testing.T) {
 		t.Fatalf("first m3 get unexpectedly succeeded; stdout:%s stderr:%s", res.stdout, res.stderr)
 	}
 
-	m3BundleDir := filepath.Join(m3Kauket, "repo", "bundles")
+	m3BundleDir := filepath.Join(roleHomePath(m3Kauket, "client"), "repo", "bundles")
 	mustMkdir(t, m3BundleDir, 0o700)
 	m3BundlePath := filepath.Join(m3BundleDir, m3ID+".age")
 	if err := os.WriteFile(m3BundlePath, m2Bundle, 0o600); err != nil {
@@ -365,12 +365,13 @@ func TestNegativeCorruptBundle(t *testing.T) {
 	if err := os.Remove(dest); err != nil {
 		t.Fatalf("remove dest before corrupt test: %v", err)
 	}
-	stateFile := filepath.Join(clientKauket, "state", "installed.json")
+	clientRoleHome := roleHomePath(clientKauket, "client")
+	stateFile := filepath.Join(clientRoleHome, "state", "installed.json")
 	if err := os.Remove(stateFile); err != nil && !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("remove installed state: %v", err)
 	}
 
-	bundlePath := filepath.Join(clientKauket, "repo", "bundles", hostID+".age")
+	bundlePath := filepath.Join(clientRoleHome, "repo", "bundles", hostID+".age")
 	bundleBytes, err := os.ReadFile(bundlePath)
 	if err != nil {
 		t.Fatalf("read client bundle: %v", err)

@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -73,13 +72,14 @@ func TestInitFreshLocalRemoteWritesExpectedFiles(t *testing.T) {
 		t.Fatalf("second line %q does not end with created", fake.Lines[1])
 	}
 
+	adminHome := config.RoleHome(home, config.RoleAdmin)
 	wantFiles := []string{
-		filepath.Join(home, "config.json"),
-		filepath.Join(home, "identities", "admin.txt"),
-		filepath.Join(home, "repo", "repo.json"),
-		filepath.Join(home, "repo", "admin", "vault.age"),
-		filepath.Join(home, "repo", "bundles", ".keep"),
-		filepath.Join(home, "repo", "requests", ".keep"),
+		filepath.Join(adminHome, "config.json"),
+		filepath.Join(adminHome, "identities", "admin.txt"),
+		filepath.Join(adminHome, "repo", "repo.json"),
+		filepath.Join(adminHome, "repo", "admin", "vault.age"),
+		filepath.Join(adminHome, "repo", "bundles", ".keep"),
+		filepath.Join(adminHome, "repo", "requests", ".keep"),
 	}
 	for _, p := range wantFiles {
 		if _, err := os.Stat(p); err != nil {
@@ -88,19 +88,19 @@ func TestInitFreshLocalRemoteWritesExpectedFiles(t *testing.T) {
 	}
 
 	if runtime.GOOS != "windows" {
-		assertMode(t, filepath.Join(home, "config.json"), 0o600)
-		assertMode(t, filepath.Join(home, "identities", "admin.txt"), 0o600)
-		assertMode(t, filepath.Join(home, "identities"), 0o700)
+		assertMode(t, filepath.Join(adminHome, "config.json"), 0o600)
+		assertMode(t, filepath.Join(adminHome, "identities", "admin.txt"), 0o600)
+		assertMode(t, filepath.Join(adminHome, "identities"), 0o700)
 	}
 
-	role, err := config.PeekRole(home)
+	role, err := config.PeekRole(adminHome)
 	if err != nil {
 		t.Fatalf("peek role: %v", err)
 	}
 	if role != config.RoleAdmin {
 		t.Fatalf("expected role admin, got %q", role)
 	}
-	cfg, err := config.LoadAdmin(home)
+	cfg, err := config.LoadAdmin(adminHome)
 	if err != nil {
 		t.Fatalf("load admin: %v", err)
 	}
@@ -130,7 +130,8 @@ func TestInitReattachIsIdempotent(t *testing.T) {
 	if err := runInit(context.Background(), a, flags); err != nil {
 		t.Fatalf("first init: %v", err)
 	}
-	cfg1, err := config.LoadAdmin(home)
+	adminHome := config.RoleHome(home, config.RoleAdmin)
+	cfg1, err := config.LoadAdmin(adminHome)
 	if err != nil {
 		t.Fatalf("load first: %v", err)
 	}
@@ -139,7 +140,7 @@ func TestInitReattachIsIdempotent(t *testing.T) {
 	if err := runInit(context.Background(), a, flags); err != nil {
 		t.Fatalf("second init: %v", err)
 	}
-	cfg2, err := config.LoadAdmin(home)
+	cfg2, err := config.LoadAdmin(adminHome)
 	if err != nil {
 		t.Fatalf("load second: %v", err)
 	}
@@ -157,7 +158,7 @@ func TestInitReattachIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestInitRefusesClientRole(t *testing.T) {
+func TestInitOnLegacyClientCreatesAdminAlongside(t *testing.T) {
 	a, _, home := newTestApp(t)
 	clientCfg := &config.Client{
 		Schema:  config.ConfigSchema,
@@ -180,19 +181,18 @@ func TestInitRefusesClientRole(t *testing.T) {
 		noGitHub: true,
 		yes:      true,
 	}
-	err := runInit(context.Background(), a, flags)
-	if err == nil {
-		t.Fatalf("expected client role refusal")
+	if err := runInit(context.Background(), a, flags); err != nil {
+		t.Fatalf("init alongside legacy client: %v", err)
 	}
-	var exitErr *ExitError
-	if !errors.As(err, &exitErr) {
-		t.Fatalf("expected ExitError, got %T: %v", err, err)
+	if _, err := config.LoadAdmin(config.RoleHome(home, config.RoleAdmin)); err != nil {
+		t.Fatalf("load admin from role home: %v", err)
 	}
-	if exitErr.Code != ExitUsage {
-		t.Fatalf("expected ExitUsage, got %d", exitErr.Code)
+	got, err := config.LoadClient(home)
+	if err != nil {
+		t.Fatalf("legacy client config should be untouched: %v", err)
 	}
-	if !strings.Contains(err.Error(), "client") {
-		t.Fatalf("expected client mention, got %q", err.Error())
+	if got.Host.ID != clientCfg.Host.ID {
+		t.Fatalf("legacy client host changed: %q", got.Host.ID)
 	}
 }
 
@@ -229,7 +229,7 @@ func TestInitAdminVaultIsEncryptedToRecipient(t *testing.T) {
 	if err := runInit(context.Background(), a, flags); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	vaultPath := filepath.Join(home, "repo", "admin", "vault.age")
+	vaultPath := filepath.Join(config.RoleHome(home, config.RoleAdmin), "repo", "admin", "vault.age")
 	ct, err := os.ReadFile(vaultPath)
 	if err != nil {
 		t.Fatalf("read vault: %v", err)

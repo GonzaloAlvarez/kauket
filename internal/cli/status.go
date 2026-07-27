@@ -15,33 +15,41 @@ import (
 )
 
 func NewStatus(a *app.App) *cobra.Command {
-	return &cobra.Command{
+	var roleFlag string
+	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Print the local kauket status",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runStatus(a)
+			return runStatus(a, roleFlag)
 		},
 	}
+	cmd.Flags().StringVar(&roleFlag, "role", "", "limit to one role (admin|client)")
+	return cmd
 }
 
-func runStatus(a *app.App) error {
-	home, err := resolveHome(a)
+func runStatus(a *app.App, roleFlag string) error {
+	targets, err := resolveTargetRoles(a, roleFlag)
 	if err != nil {
-		return &ExitError{Code: ExitUsage, Err: err}
+		return err
 	}
-	role, err := config.PeekRole(home)
-	if err != nil {
-		return &ExitError{Code: ExitUsage, Err: err}
-	}
-	switch role {
-	case config.RoleAdmin:
-		return statusAdmin(a, home)
-	case config.RoleClient:
-		return statusClient(a, home)
-	default:
+	if len(targets) == 0 {
 		a.UI.Println("role: uninitialized")
 		return nil
 	}
+	for i, t := range targets {
+		if i > 0 {
+			a.UI.Println("")
+		}
+		if t.role == config.RoleAdmin {
+			err = statusAdmin(a, t.home)
+		} else {
+			err = statusClient(a, t.home)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func statusAdmin(a *app.App, home string) error {

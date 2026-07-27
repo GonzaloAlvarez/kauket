@@ -14,8 +14,10 @@ import (
 	gogit "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/gonzaloalvarez/kauket/internal/agebox"
+	"github.com/gonzaloalvarez/kauket/internal/app"
 	"github.com/gonzaloalvarez/kauket/internal/bundle"
 	"github.com/gonzaloalvarez/kauket/internal/config"
+	"github.com/gonzaloalvarez/kauket/internal/ui"
 )
 
 var enrollRequestBranchRe = regexp.MustCompile(`^refs/heads/request/rq_[a-z2-7]{16}$`)
@@ -42,7 +44,7 @@ func collectEnrollRequestRefs(t *testing.T, bareURL string) []string {
 	return out
 }
 
-func setupAdminStore(t *testing.T) (adminHome, bareURL string) {
+func setupAdminStore(t *testing.T) (baseHome, adminHome, bareURL string) {
 	t.Helper()
 	a, _, home := newTestApp(t)
 	url := bareRepo(t)
@@ -57,13 +59,14 @@ func setupAdminStore(t *testing.T) (adminHome, bareURL string) {
 	if err := runInit(context.Background(), a, flags); err != nil {
 		t.Fatalf("admin init: %v", err)
 	}
-	return home, url
+	return home, config.RoleHome(home, config.RoleAdmin), url
 }
 
 func TestEnrollSuccess(t *testing.T) {
-	_, bareURL := setupAdminStore(t)
+	_, _, bareURL := setupAdminStore(t)
 
-	clientApp, fake, clientHome := newTestApp(t)
+	clientApp, fake, clientBase := newTestApp(t)
+	clientHome := config.RoleHome(clientBase, config.RoleClient)
 	flags := &enrollFlags{
 		requests: []string{"ssh"},
 		name:     "machine2",
@@ -181,39 +184,30 @@ func TestEnrollSuccess(t *testing.T) {
 	}
 }
 
-func TestEnrollRefusesAdminRole(t *testing.T) {
-	a, _, home := newTestApp(t)
-	adminCfg := &config.Admin{
-		Schema:  config.ConfigSchema,
-		Role:    config.RoleAdmin,
-		StoreID: "ks_admin",
-		Repo:    config.DefaultRepoInfo("GonzaloAlvarez", "kauket-store"),
-		Admin: config.AdminInfo{
-			RecipientID:  "ar_admin",
-			IdentityPath: "identities/admin.txt",
-		},
-	}
-	if err := config.SaveAdmin(home, adminCfg); err != nil {
-		t.Fatalf("save admin: %v", err)
-	}
+func TestEnrollOnAdminHomeCreatesClientAlongside(t *testing.T) {
+	adminBase, adminHome, bareURL := setupAdminStore(t)
+
+	a := &app.App{UI: &ui.Fake{}, Home: adminBase}
 	flags := &enrollFlags{
 		requests: []string{"ssh"},
-		remote:   bareRepo(t),
+		name:     "dualhost",
+		remote:   bareURL,
 		yes:      true,
 	}
-	err := runEnroll(context.Background(), a, flags)
-	if err == nil {
-		t.Fatalf("expected error when enrolling on admin home")
+	if err := runEnroll(context.Background(), a, flags); err != nil {
+		t.Fatalf("runEnroll on admin home: %v", err)
 	}
-	var exitErr *ExitError
-	if !errors.As(err, &exitErr) {
-		t.Fatalf("expected ExitError, got %T: %v", err, err)
+
+	clientHome := config.RoleHome(adminBase, config.RoleClient)
+	clientCfg, err := config.LoadClient(clientHome)
+	if err != nil {
+		t.Fatalf("load client alongside admin: %v", err)
 	}
-	if exitErr.Code != ExitUsage {
-		t.Fatalf("expected ExitUsage, got %d", exitErr.Code)
+	if clientCfg.Host.DisplayName != "dualhost" {
+		t.Fatalf("display name: %q", clientCfg.Host.DisplayName)
 	}
-	if !strings.Contains(err.Error(), "admin") {
-		t.Fatalf("expected admin mention, got %q", err.Error())
+	if _, err := config.LoadAdmin(adminHome); err != nil {
+		t.Fatalf("admin config should be untouched: %v", err)
 	}
 }
 
@@ -254,9 +248,10 @@ func TestEnrollRefusesAlreadyEnrolled(t *testing.T) {
 }
 
 func TestEnrollOfflineMode(t *testing.T) {
-	_, bareURL := setupAdminStore(t)
+	_, _, bareURL := setupAdminStore(t)
 
-	clientApp, fake, clientHome := newTestApp(t)
+	clientApp, fake, clientBase := newTestApp(t)
+	clientHome := config.RoleHome(clientBase, config.RoleClient)
 	flags := &enrollFlags{
 		requests: []string{"ssh"},
 		name:     "machine2",
@@ -311,7 +306,7 @@ func TestEnrollOfflineMode(t *testing.T) {
 }
 
 func TestEnrollRequiresRequestFlag(t *testing.T) {
-	_, bareURL := setupAdminStore(t)
+	_, _, bareURL := setupAdminStore(t)
 	clientApp, _, _ := newTestApp(t)
 	flags := &enrollFlags{
 		requests: nil,
@@ -352,7 +347,7 @@ func TestEnrollRequiresRemoteOrRepo(t *testing.T) {
 }
 
 func TestEnrollRequestEncryptedToAdminRecipient(t *testing.T) {
-	adminHome, bareURL := setupAdminStore(t)
+	_, adminHome, bareURL := setupAdminStore(t)
 
 	clientApp, _, _ := newTestApp(t)
 	flags := &enrollFlags{

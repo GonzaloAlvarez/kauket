@@ -52,18 +52,12 @@ func runApprove(ctx context.Context, a *app.App, f *approveFlags) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	home, err := resolveHome(a)
+	home, err := requireRoleHome(a, config.RoleAdmin, "kauket approve")
 	if err != nil {
-		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("kauket: resolve home: %w", err)}
+		return err
 	}
 	cfg, err := config.LoadAdmin(home)
 	if err != nil {
-		if errors.Is(err, config.ErrNoConfig) {
-			return &ExitError{Code: ExitUsage, Err: errors.New("kauket: no kauket store configured here; run 'kauket init' first")}
-		}
-		if errors.Is(err, config.ErrNotAdmin) {
-			return &ExitError{Code: ExitUsage, Err: errors.New("kauket: kauket approve requires admin role")}
-		}
 		return &ExitError{Code: ExitUsage, Err: err}
 	}
 
@@ -216,7 +210,7 @@ func runApprove(ctx context.Context, a *app.App, f *approveFlags) error {
 			a.UI.Println(fmt.Sprintf("request %d approved (dry-run)", idx+1))
 			continue
 		}
-		if err := approveOne(ctx, a, store, &vault, cfg, v.req, useGitHub, token, now); err != nil {
+		if err := approveOne(ctx, a, home, store, &vault, cfg, v.req, useGitHub, token, now); err != nil {
 			a.UI.Errorf("request %d: %v", idx+1, err)
 			continue
 		}
@@ -269,7 +263,7 @@ func selectRequests(a *app.App, requests []validRequest, f *approveFlags) ([]int
 	return out, nil
 }
 
-func approveOne(ctx context.Context, a *app.App, store *gitstore.Store, vault *model.Vault, cfg *config.Admin, req model.Request, useGitHub bool, token string, now func() time.Time) error {
+func approveOne(ctx context.Context, a *app.App, home string, store *gitstore.Store, vault *model.Vault, cfg *config.Admin, req model.Request, useGitHub bool, token string, now func() time.Time) error {
 	if useGitHub {
 		manager := &gitstore.DeployKeyManager{
 			Owner:      cfg.Repo.Owner,
@@ -329,10 +323,6 @@ func approveOne(ctx context.Context, a *app.App, store *gitstore.Store, vault *m
 		return fmt.Errorf("encode vault: %w", err)
 	}
 
-	home, err := resolveHome(a)
-	if err != nil {
-		return err
-	}
 	vaultPath := filepath.Join(config.RepoDir(home), "admin", "vault.age")
 	bundlePath := filepath.Join(config.RepoDir(home), "bundles", req.Host.ID+".age")
 	if err := writeRepoFile(vaultPath, newVaultCT); err != nil {

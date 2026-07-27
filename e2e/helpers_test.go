@@ -134,9 +134,17 @@ func exitCodeOf(err error) int {
 	return -1
 }
 
+func roleHomePath(base, role string) string {
+	sub := filepath.Join(base, role)
+	if _, err := os.Stat(filepath.Join(sub, "config.json")); err == nil {
+		return sub
+	}
+	return base
+}
+
 func readHostID(t *testing.T, clientKauket string) string {
 	t.Helper()
-	cfgPath := filepath.Join(clientKauket, "config.json")
+	cfgPath := filepath.Join(roleHomePath(clientKauket, "client"), "config.json")
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {
 		t.Fatalf("read client config: %v", err)

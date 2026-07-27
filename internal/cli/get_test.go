@@ -60,6 +60,10 @@ type clientFixture struct {
 }
 
 func setupClient(t *testing.T) (*clientFixture, *age.X25519Identity, *age.X25519Identity) {
+	return setupClientLayout(t, false)
+}
+
+func setupClientLayout(t *testing.T, legacy bool) (*clientFixture, *age.X25519Identity, *age.X25519Identity) {
 	t.Helper()
 	tempHome := t.TempDir()
 	resolved, err := filepath.EvalSymlinks(tempHome)
@@ -69,7 +73,11 @@ func setupClient(t *testing.T) (*clientFixture, *age.X25519Identity, *age.X25519
 	tempHome = resolved
 	t.Setenv("HOME", tempHome)
 
-	kauketHome := filepath.Join(tempHome, ".config", "kauket")
+	kauketBase := filepath.Join(tempHome, ".config", "kauket")
+	kauketHome := kauketBase
+	if !legacy {
+		kauketHome = config.RoleHome(kauketBase, config.RoleClient)
+	}
 	if err := os.MkdirAll(kauketHome, 0o700); err != nil {
 		t.Fatalf("mkdir kauket home: %v", err)
 	}
@@ -79,7 +87,7 @@ func setupClient(t *testing.T) (*clientFixture, *age.X25519Identity, *age.X25519
 	fake := &ui.Fake{}
 	a := &app.App{
 		UI:   fake,
-		Home: kauketHome,
+		Home: kauketBase,
 		Now:  func() time.Time { return time.Date(2026, 5, 24, 14, 12, 33, 0, time.UTC) },
 	}
 
@@ -290,6 +298,25 @@ func TestGetCreatesFile(t *testing.T) {
 		if di.Mode().Perm() != 0o700 {
 			t.Fatalf("dir mode: got %o want 0700", di.Mode().Perm())
 		}
+	}
+}
+
+func TestGetLegacyRootLayout(t *testing.T) {
+	fx, hostIdentity, adminIdentity := setupClientLayout(t, true)
+	ct := encryptBundleFor(t, fx, hostIdentity, adminIdentity, defaultBundleSecrets(fx))
+	writeLocalBundle(t, fx.home, fx.hostID, ct)
+
+	flags := &getFlags{noSync: true}
+	if err := runGet(context.Background(), fx.app, flags, testSecretID); err != nil {
+		t.Fatalf("runGet on legacy layout: %v", err)
+	}
+	expanded := filepath.Join(fx.tempHome, ".ssh", "main_private_key")
+	got, err := os.ReadFile(expanded)
+	if err != nil {
+		t.Fatalf("read dest: %v", err)
+	}
+	if string(got) != testSecretContent {
+		t.Fatalf("content mismatch: got %q want %q", string(got), testSecretContent)
 	}
 }
 

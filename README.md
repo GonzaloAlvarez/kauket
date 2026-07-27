@@ -27,6 +27,30 @@ kauket approve
 kauket get ssh.main_private_key
 ```
 
+## Running admin and client on the same machine
+
+A machine can hold both roles in one `KAUKET_HOME` (default `~/.config/kauket`). Each role lives in its own subdirectory, and every command picks the role it needs — no environment switching:
+
+```sh
+kauket init                 # creates <KAUKET_HOME>/admin/
+kauket enroll --request ssh # creates <KAUKET_HOME>/client/ alongside
+kauket add ...              # admin commands use admin/
+kauket get ...              # client commands use client/
+kauket status               # shows both roles; --role admin|client narrows
+```
+
+Pre-existing installs that keep `config.json` at the `KAUKET_HOME` root continue to work unchanged. To normalize one into the role-subdirectory layout, run `kauket migrate`.
+
+To consolidate two existing single-role homes into one:
+
+```sh
+KAUKET_HOME=~/.config/kauket kauket migrate   # move the default home's role into its subdir
+mv $OLD_CLIENT_HOME ~/.config/kauket/client   # bring the other role in as client/ (or admin/)
+kauket status                                 # shows both roles
+```
+
+All paths stored in a role's config are relative, so a role home is relocatable as a unit.
+
 ## Install
 
 Via [amun](https://github.com/GonzaloAlvarez/amun) (recommended; verifies checksum, installs binary, creates `~/.config/kauket` with mode 0700):

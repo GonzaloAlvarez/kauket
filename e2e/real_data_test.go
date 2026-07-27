@@ -83,7 +83,7 @@ func TestRealDataSshEd25519PrivateKey(t *testing.T) {
 		t.Fatalf("installed file does not match source byte-for-byte")
 	}
 
-	adminRepo := filepath.Join(adminKauket, "repo")
+	adminRepo := filepath.Join(roleHomePath(adminKauket, "admin"), "repo")
 	for _, term := range []string{"ssh.main_private_key", "main_private_key", "BEGIN OPENSSH"} {
 		hits := grepRepo(t, adminRepo, term)
 		if len(hits) != 0 {
@@ -147,7 +147,7 @@ func TestRealDataAwsCredentialsFile(t *testing.T) {
 		t.Fatalf("installed aws creds differ from source; got %q", string(installed))
 	}
 
-	adminRepo := filepath.Join(adminKauket, "repo")
+	adminRepo := filepath.Join(roleHomePath(adminKauket, "admin"), "repo")
 	for _, term := range []string{"AKIAIOSFODNN7EXAMPLE", "aws.primary_account"} {
 		hits := grepRepo(t, adminRepo, term)
 		if len(hits) != 0 {

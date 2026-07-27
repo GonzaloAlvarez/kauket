@@ -25,7 +25,7 @@ func TestListAdminOutput(t *testing.T) {
 	}
 	fake.Lines = nil
 
-	if err := runList(a); err != nil {
+	if err := runList(a, ""); err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	if len(fake.Lines) != 2 {
@@ -44,7 +44,7 @@ func TestListAdminOutput(t *testing.T) {
 
 func TestListAdminEmpty(t *testing.T) {
 	a, fake, _ := initAdminFixture(t)
-	if err := runList(a); err != nil {
+	if err := runList(a, ""); err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	if len(fake.Lines) != 0 {
@@ -68,7 +68,7 @@ func TestListClientNoBundle(t *testing.T) {
 	if err := config.SaveClient(home, clientCfg); err != nil {
 		t.Fatalf("save client: %v", err)
 	}
-	err := runList(a)
+	err := runList(a, "")
 	if err == nil {
 		t.Fatalf("expected error when no bundle present")
 	}
@@ -86,7 +86,7 @@ func TestListClientNoBundle(t *testing.T) {
 
 func TestListUninitialized(t *testing.T) {
 	a, _, _ := newTestApp(t)
-	err := runList(a)
+	err := runList(a, "")
 	if err == nil {
 		t.Fatalf("expected error when uninitialized")
 	}

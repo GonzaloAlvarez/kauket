@@ -108,7 +108,7 @@ func TestGetLocalE2E(t *testing.T) {
 		}
 	}
 
-	checkout := adminKauket + "/repo"
+	checkout := filepath.Join(roleHomePath(adminKauket, "admin"), "repo")
 	forbidden := []string{
 		"ssh.main_private_key",
 		"main_private_key",

@@ -75,14 +75,15 @@ func TestEnrollLocalE2E(t *testing.T) {
 		t.Fatalf("expected 'waiting for approval' in stdout, got: %q", res.stdout)
 	}
 
+	clientRoleHome := filepath.Join(clientKauket, "client")
 	wantFiles := []struct {
 		path string
 		mode os.FileMode
 	}{
-		{filepath.Join(clientKauket, "identities", "host.txt"), 0o600},
-		{filepath.Join(clientKauket, "git", "deploy_key"), 0o600},
-		{filepath.Join(clientKauket, "git", "deploy_key.pub"), 0o644},
-		{filepath.Join(clientKauket, "config.json"), 0o600},
+		{filepath.Join(clientRoleHome, "identities", "host.txt"), 0o600},
+		{filepath.Join(clientRoleHome, "git", "deploy_key"), 0o600},
+		{filepath.Join(clientRoleHome, "git", "deploy_key.pub"), 0o644},
+		{filepath.Join(clientRoleHome, "config.json"), 0o600},
 	}
 	for _, wf := range wantFiles {
 		info, err := os.Stat(wf.path)
@@ -105,7 +106,7 @@ func TestEnrollLocalE2E(t *testing.T) {
 		t.Fatalf("ref %q does not match %s", refs[0], enrollE2EBranchRe)
 	}
 
-	cfgBytes, err := os.ReadFile(filepath.Join(clientKauket, "config.json"))
+	cfgBytes, err := os.ReadFile(filepath.Join(clientRoleHome, "config.json"))
 	if err != nil {
 		t.Fatalf("read client config: %v", err)
 	}
@@ -151,7 +152,7 @@ func TestEnrollLocalE2E(t *testing.T) {
 	}
 }
 
-func TestEnrollLocalE2ERefusesAdminHome(t *testing.T) {
+func TestEnrollLocalE2EOnAdminHomeCreatesClientRole(t *testing.T) {
 	bin := buildBinary(t)
 
 	root := t.TempDir()
@@ -168,11 +169,23 @@ func TestEnrollLocalE2ERefusesAdminHome(t *testing.T) {
 		t.Fatalf("admin init failed: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
 
-	res = runKauket(t, bin, adminKauket, adminHome, "enroll", "--remote", remoteURL, "--request", "ssh", "--yes")
-	if res.err == nil {
-		t.Fatalf("expected enroll on admin home to fail, got nil")
+	res = runKauket(t, bin, adminKauket, adminHome, "enroll", "--remote", remoteURL, "--request", "ssh", "--name", "dualhost", "--yes")
+	if res.err != nil {
+		t.Fatalf("enroll on admin home failed: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
-	if !strings.Contains(res.stderr, "admin") {
-		t.Fatalf("expected admin mention in stderr, got: %q", res.stderr)
+
+	if _, err := os.Stat(filepath.Join(adminKauket, "client", "config.json")); err != nil {
+		t.Fatalf("client role config missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(adminKauket, "admin", "config.json")); err != nil {
+		t.Fatalf("admin role config missing: %v", err)
+	}
+
+	res = runKauket(t, bin, adminKauket, adminHome, "status")
+	if res.err != nil {
+		t.Fatalf("status failed: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
+	}
+	if !strings.Contains(res.stdout, "role: admin") || !strings.Contains(res.stdout, "role: client") {
+		t.Fatalf("status should show both roles, got: %q", res.stdout)
 	}
 }

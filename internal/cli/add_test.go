@@ -35,7 +35,7 @@ func initAdminFixture(t *testing.T) (*app.App, *ui.Fake, string) {
 		t.Fatalf("init: %v", err)
 	}
 	fake.Lines = nil
-	return a, fake, home
+	return a, fake, config.RoleHome(home, config.RoleAdmin)
 }
 
 func loadAdminVault(t *testing.T, home string) model.Vault {

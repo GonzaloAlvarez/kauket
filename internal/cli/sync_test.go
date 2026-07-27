@@ -30,7 +30,7 @@ func TestSyncAdminAfterInit(t *testing.T) {
 		t.Fatalf("init: %v", err)
 	}
 	fake.Lines = nil
-	if err := runSync(context.Background(), a); err != nil {
+	if err := runSync(context.Background(), a, ""); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
 	if len(fake.Lines) != 1 || fake.Lines[0] != "synced" {
@@ -88,7 +88,7 @@ func writeEd25519DeployKey(t *testing.T, path string) {
 
 func TestSyncUninitializedFails(t *testing.T) {
 	a, _, _ := newTestApp(t)
-	err := runSync(context.Background(), a)
+	err := runSync(context.Background(), a, "")
 	if err == nil {
 		t.Fatalf("expected error on uninitialized sync")
 	}

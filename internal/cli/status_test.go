@@ -11,7 +11,7 @@ import (
 
 func TestStatusUninitialized(t *testing.T) {
 	a, fake, _ := newTestApp(t)
-	if err := runStatus(a); err != nil {
+	if err := runStatus(a, ""); err != nil {
 		t.Fatalf("runStatus: %v", err)
 	}
 	if len(fake.Lines) != 1 || fake.Lines[0] != "role: uninitialized" {
@@ -34,7 +34,7 @@ func TestStatusAdminAfterInit(t *testing.T) {
 		t.Fatalf("init: %v", err)
 	}
 	fake.Lines = nil
-	if err := runStatus(a); err != nil {
+	if err := runStatus(a, ""); err != nil {
 		t.Fatalf("status: %v", err)
 	}
 	wantLines := []string{
@@ -72,7 +72,7 @@ func TestStatusClient(t *testing.T) {
 	if err := config.SaveClient(home, clientCfg); err != nil {
 		t.Fatalf("save client: %v", err)
 	}
-	if err := runStatus(a); err != nil {
+	if err := runStatus(a, ""); err != nil {
 		t.Fatalf("status: %v", err)
 	}
 	want := []string{

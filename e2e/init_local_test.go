@@ -33,13 +33,14 @@ func TestInitLocalE2E(t *testing.T) {
 		t.Fatalf("expected stdout to contain admin recipient ar_, got: %q", res.stdout)
 	}
 
+	adminKauketHome := filepath.Join(kauketHome, "admin")
 	wantFiles := []string{
-		filepath.Join(kauketHome, "config.json"),
-		filepath.Join(kauketHome, "identities", "admin.txt"),
-		filepath.Join(kauketHome, "repo", "repo.json"),
-		filepath.Join(kauketHome, "repo", "admin", "vault.age"),
-		filepath.Join(kauketHome, "repo", "bundles", ".keep"),
-		filepath.Join(kauketHome, "repo", "requests", ".keep"),
+		filepath.Join(adminKauketHome, "config.json"),
+		filepath.Join(adminKauketHome, "identities", "admin.txt"),
+		filepath.Join(adminKauketHome, "repo", "repo.json"),
+		filepath.Join(adminKauketHome, "repo", "admin", "vault.age"),
+		filepath.Join(adminKauketHome, "repo", "bundles", ".keep"),
+		filepath.Join(adminKauketHome, "repo", "requests", ".keep"),
 	}
 	for _, p := range wantFiles {
 		if _, err := os.Stat(p); err != nil {
@@ -48,8 +49,8 @@ func TestInitLocalE2E(t *testing.T) {
 	}
 
 	if runtime.GOOS != "windows" {
-		assertMode(t, filepath.Join(kauketHome, "config.json"), 0o600)
-		assertMode(t, filepath.Join(kauketHome, "identities", "admin.txt"), 0o600)
+		assertMode(t, filepath.Join(adminKauketHome, "config.json"), 0o600)
+		assertMode(t, filepath.Join(adminKauketHome, "identities", "admin.txt"), 0o600)
 	}
 
 	res = runKauket(t, bin, kauketHome, adminHome, "init", "--remote", remoteURL, "--no-github", "--yes")

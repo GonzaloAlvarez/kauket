@@ -63,20 +63,9 @@ func runInit(ctx context.Context, a *app.App, f *initFlags) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	home, err := resolveHome(a)
+	home, _, err := resolveRoleHome(a, config.RoleAdmin)
 	if err != nil {
 		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("kauket: resolve home: %w", err)}
-	}
-
-	role, err := config.PeekRole(home)
-	if err != nil {
-		return &ExitError{Code: ExitUsage, Err: err}
-	}
-	if role == config.RoleClient {
-		return &ExitError{
-			Code: ExitUsage,
-			Err:  errors.New("kauket: this machine is configured as a client; run kauket init in a fresh KAUKET_HOME or use --force-new-store (not yet implemented)"),
-		}
 	}
 
 	if err := os.MkdirAll(home, 0o700); err != nil {
@@ -84,12 +73,6 @@ func runInit(ctx context.Context, a *app.App, f *initFlags) error {
 	}
 	if err := config.EnsureIdentitiesDir(home); err != nil {
 		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("kauket: create identities dir: %w", err)}
-	}
-	if err := config.EnsureGitDir(home); err != nil {
-		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("kauket: create git dir: %w", err)}
-	}
-	if err := config.EnsureStateDir(home); err != nil {
-		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("kauket: create state dir: %w", err)}
 	}
 
 	identityPath := config.AdminIdentityPath(home)

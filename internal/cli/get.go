@@ -52,11 +52,6 @@ func runGet(ctx context.Context, a *app.App, f *getFlags, secretID string) error
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	home, err := resolveHome(a)
-	if err != nil {
-		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("kauket: resolve home: %w", err)}
-	}
-
 	if f.inspect || f.asHost != "" {
 		if f.force || f.backup || f.stdout {
 			return &ExitError{Code: ExitUsage, Err: errors.New("kauket: --inspect and --as-host cannot be combined with --stdout, --force, or --backup")}
@@ -64,20 +59,27 @@ func runGet(ctx context.Context, a *app.App, f *getFlags, secretID string) error
 		if f.inspect && f.asHost != "" {
 			return &ExitError{Code: ExitUsage, Err: errors.New("kauket: --inspect and --as-host cannot be combined")}
 		}
-		if f.inspect {
-			return runInspect(ctx, a, f, secretID, home)
+		flagName := "--inspect"
+		if f.asHost != "" {
+			flagName = "--as-host"
 		}
-		return runInspectHost(ctx, a, f, secretID, f.asHost, home)
+		adminHome, err := requireRoleHome(a, config.RoleAdmin, "kauket get "+flagName)
+		if err != nil {
+			return err
+		}
+		if f.inspect {
+			return runInspect(ctx, a, f, secretID, adminHome)
+		}
+		return runInspectHost(ctx, a, f, secretID, f.asHost, adminHome)
+	}
+
+	home, err := requireRoleHome(a, config.RoleClient, "kauket get")
+	if err != nil {
+		return err
 	}
 
 	cfg, err := config.LoadClient(home)
 	if err != nil {
-		if errors.Is(err, config.ErrNoConfig) {
-			return &ExitError{Code: ExitUsage, Err: errors.New("kauket: no kauket store configured here; run 'kauket enroll' first")}
-		}
-		if errors.Is(err, config.ErrNotClient) {
-			return &ExitError{Code: ExitUsage, Err: errors.New("kauket: kauket get requires client role")}
-		}
 		return &ExitError{Code: ExitUsage, Err: err}
 	}
 
@@ -165,9 +167,9 @@ func runGetSync(ctx context.Context, a *app.App, home string, cfg *config.Client
 }
 
 func runInspect(ctx context.Context, a *app.App, f *getFlags, secretID, home string) error {
-	cfg, err := loadAdminForRead(home, "--inspect")
+	cfg, err := config.LoadAdmin(home)
 	if err != nil {
-		return err
+		return &ExitError{Code: ExitUsage, Err: err}
 	}
 
 	if !f.noSync {
@@ -195,9 +197,9 @@ func runInspect(ctx context.Context, a *app.App, f *getFlags, secretID, home str
 }
 
 func runInspectHost(ctx context.Context, a *app.App, f *getFlags, secretID, hostID, home string) error {
-	cfg, err := loadAdminForRead(home, "--as-host")
+	cfg, err := config.LoadAdmin(home)
 	if err != nil {
-		return err
+		return &ExitError{Code: ExitUsage, Err: err}
 	}
 
 	if !f.noSync {
@@ -225,20 +227,6 @@ func runInspectHost(ctx context.Context, a *app.App, f *getFlags, secretID, host
 		return &ExitError{Code: ExitNotGranted, Err: fmt.Errorf("secret %s is not granted to host %s", secretID, hostID)}
 	}
 	return writeSecretStdout(secret.ContentBase64)
-}
-
-func loadAdminForRead(home, flag string) (*config.Admin, error) {
-	cfg, err := config.LoadAdmin(home)
-	if err != nil {
-		if errors.Is(err, config.ErrNoConfig) {
-			return nil, &ExitError{Code: ExitUsage, Err: errors.New("kauket: no kauket store configured here; run 'kauket init' first")}
-		}
-		if errors.Is(err, config.ErrNotAdmin) {
-			return nil, &ExitError{Code: ExitUsage, Err: fmt.Errorf("kauket: kauket get %s requires admin role", flag)}
-		}
-		return nil, &ExitError{Code: ExitUsage, Err: err}
-	}
-	return cfg, nil
 }
 
 func adminIdentityPath(cfg *config.Admin, home string) string {

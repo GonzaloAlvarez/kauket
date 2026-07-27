@@ -17,32 +17,44 @@ import (
 )
 
 func NewList(a *app.App) *cobra.Command {
-	return &cobra.Command{
+	var roleFlag string
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List secrets visible to this role",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runList(a)
+			return runList(a, roleFlag)
 		},
 	}
+	cmd.Flags().StringVar(&roleFlag, "role", "", "limit to one role (admin|client)")
+	return cmd
 }
 
-func runList(a *app.App) error {
-	home, err := resolveHome(a)
+func runList(a *app.App, roleFlag string) error {
+	targets, err := resolveTargetRoles(a, roleFlag)
 	if err != nil {
-		return &ExitError{Code: ExitUsage, Err: err}
+		return err
 	}
-	role, err := config.PeekRole(home)
-	if err != nil {
-		return &ExitError{Code: ExitUsage, Err: err}
-	}
-	switch role {
-	case config.RoleAdmin:
-		return listAdmin(a, home)
-	case config.RoleClient:
-		return listClient(a, home)
-	default:
+	if len(targets) == 0 {
 		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: no kauket store configured here")}
 	}
+	dual := len(targets) > 1
+	for i, t := range targets {
+		if dual {
+			if i > 0 {
+				a.UI.Println("")
+			}
+			a.UI.Println(fmt.Sprintf("role: %s", t.role))
+		}
+		if t.role == config.RoleAdmin {
+			err = listAdmin(a, t.home)
+		} else {
+			err = listClient(a, t.home)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func listAdmin(a *app.App, home string) error {
