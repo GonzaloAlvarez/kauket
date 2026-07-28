@@ -34,3 +34,23 @@ func NewSecretObjectID() string {
 func NewAdminRecipientID() string {
 	return randomID("ar_")
 }
+
+func NewNodeID() string {
+	return randomID("n_")
+}
+
+func NewIndexObjectID() string {
+	return randomID("x_")
+}
+
+func NewObjectID() string {
+	return randomID("o_")
+}
+
+func NewRoutedRequestID() string {
+	return randomID("r_")
+}
+
+func NewIdentityID() string {
+	return randomID("i_")
+}

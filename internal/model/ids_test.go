@@ -16,6 +16,11 @@ func TestIDGenerators(t *testing.T) {
 		{"RequestID", "rq_", NewRequestID},
 		{"SecretObjectID", "s_", NewSecretObjectID},
 		{"AdminRecipientID", "ar_", NewAdminRecipientID},
+		{"NodeID", "n_", NewNodeID},
+		{"IndexObjectID", "x_", NewIndexObjectID},
+		{"ObjectID", "o_", NewObjectID},
+		{"RoutedRequestID", "r_", NewRoutedRequestID},
+		{"IdentityID", "i_", NewIdentityID},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

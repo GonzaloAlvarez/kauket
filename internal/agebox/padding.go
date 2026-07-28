@@ -23,12 +23,29 @@ var paddingClasses = []int{
 	4 * 1024 * 1024,
 }
 
+var metaPaddingClasses = []int{
+	4 * 1024,
+	16 * 1024,
+	64 * 1024,
+	256 * 1024,
+	1024 * 1024,
+	4 * 1024 * 1024,
+}
+
 type paddingEnvelope struct {
 	PayloadBase64 string `json:"payload_base64"`
 	PaddingBase64 string `json:"padding_base64"`
 }
 
 func Wrap(payload []byte, maxSize int) ([]byte, error) {
+	return wrapClasses(payload, paddingClasses, maxSize)
+}
+
+func WrapMeta(payload []byte) ([]byte, error) {
+	return wrapClasses(payload, metaPaddingClasses, 0)
+}
+
+func wrapClasses(payload []byte, baseClasses []int, maxSize int) ([]byte, error) {
 	payloadB64 := base64.StdEncoding.EncodeToString(payload)
 	base := classOverhead + len(payloadB64)
 
@@ -37,9 +54,9 @@ func Wrap(payload []byte, maxSize int) ([]byte, error) {
 		limit = maxSize
 	}
 
-	classes := paddingClasses
-	if limit > paddingClasses[len(paddingClasses)-1] {
-		classes = append(append([]int(nil), paddingClasses...), limit)
+	classes := baseClasses
+	if limit > baseClasses[len(baseClasses)-1] {
+		classes = append(append([]int(nil), baseClasses...), limit)
 	}
 
 	target := -1

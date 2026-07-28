@@ -71,6 +71,10 @@ func LockPath(home string) string {
 	return filepath.Join(home, "repo.lock")
 }
 
+func PinsPath(home string) string {
+	return filepath.Join(home, "state", "pins.json")
+}
+
 func EnsureIdentitiesDir(home string) error {
 	return os.MkdirAll(IdentitiesDir(home), 0700)
 }
