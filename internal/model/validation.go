@@ -5,7 +5,7 @@ import (
 	"regexp"
 )
 
-var secretIDRegex = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$`)
+var secretIDRegex = regexp.MustCompile(`^[a-z][a-z0-9_-]*(\.[a-z][a-z0-9_-]*)+$`)
 
 func ValidateSecretID(id string) error {
 	if !secretIDRegex.MatchString(id) {

@@ -9,6 +9,7 @@ var (
 	ErrRelativeDest         = errors.New("destination must be absolute after expansion")
 	ErrPathTraversal        = errors.New("destination contains path traversal segments")
 	ErrUnmanagedDestination = errors.New("destination exists and was not installed by kauket")
+	ErrUnmanagedSection     = errors.New("existing aws profile section was not installed by kauket")
 	ErrParentNotDir         = errors.New("parent path is not a directory")
 )
 

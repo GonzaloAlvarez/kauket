@@ -27,6 +27,16 @@ kauket approve
 kauket get ssh.main_private_key
 ```
 
+AWS profiles can be captured and distributed without touching other profiles on the target machine:
+
+```sh
+# Admin machine: capture [profile amzn-wanfe] (and its sso-session) from ~/.aws
+kauket add --aws-profile amzn-wanfe
+
+# Client machine: merge just that profile into ~/.aws/config and ~/.aws/credentials
+kauket get aws.profile.amzn-wanfe
+```
+
 ## Running admin and client on the same machine
 
 A machine can hold both roles in one `KAUKET_HOME` (default `~/.config/kauket`). Each role lives in its own subdirectory, and every command picks the role it needs — no environment switching:

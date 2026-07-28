@@ -516,6 +516,31 @@ Before encryption, `admin/vault.age` plaintext is canonical JSON:
 
 This file is encrypted to admin recipients only.
 
+### Secret kinds
+
+`kind` is one of:
+
+```text
+file           whole-file secret installed at install.destination (v1.0)
+aws_profile    AWS profile sections merged into ~/.aws/config and ~/.aws/credentials (v1.3)
+```
+
+For `aws_profile` secrets, `install` is intentionally empty (pre-v1.3 clients that
+ignore `kind` then fail with an install error instead of clobbering `~/.aws` files)
+and `content_base64` decodes to a JSON envelope:
+
+```json
+{
+  "schema": 1,
+  "profile": "amzn-wanfe",
+  "config": "[profile amzn-wanfe]\nregion = us-west-2\nsso_session = amzn\n\n[sso-session amzn]\nsso_start_url = https://...\n",
+  "credentials": "[amzn-wanfe]\naws_access_key_id = ...\naws_secret_access_key = ...\n"
+}
+```
+
+`config` and `credentials` hold the raw INI text of the captured sections; either
+may be empty when the profile only exists in one file, never both.
+
 ## 4.4 Host bundle plaintext schema
 
 Before encryption, a host bundle is canonical JSON:
@@ -846,6 +871,7 @@ If `KAUKET_HOME` exists with client role, fail unless `--force-new-store` is add
 
 ```sh
 kauket add <secret-id> <source-file> [flags]
+kauket add --aws-profile <name> [flags]
 ```
 
 Flags:
@@ -855,6 +881,7 @@ Flags:
 --mode string           default inferred
 --directory-mode string default inferred
 --profile string        repeatable
+--aws-profile string    capture an AWS profile from ~/.aws into secret aws.profile.<name>
 --force                 replace existing secret
 ```
 
@@ -862,6 +889,31 @@ Flags:
 
 ```sh
 kauket add ssh.main_private_key ~/.ssh/main_private_key.pem
+kauket add --aws-profile amzn-wanfe
+```
+
+### AWS profile capture
+
+`--aws-profile <name>` takes no positional arguments and rejects `--dest`,
+`--mode`, and `--directory-mode`. The secret id is derived as `aws.profile.<name>`
+and the secret kind is `aws_profile`. Capture reads `$AWS_CONFIG_FILE` (default
+`~/.aws/config`) and `$AWS_SHARED_CREDENTIALS_FILE` (default `~/.aws/credentials`)
+on the admin machine and extracts:
+
+```text
+[profile <name>] (or [<name>], or [default]/[profile default] for the default profile) from config
+[<name>] from credentials
+the [sso-session X] section referenced by a sso_session = X key in the profile section
+```
+
+The profile must exist in at least one of the two files. A `source_profile`
+reference is not followed and produces a warning. Required output per captured
+section, before the usual `added`/`updated` lines:
+
+```text
+captured [profile amzn-wanfe] from /home/user/.aws/config
+captured [sso-session amzn] from /home/user/.aws/config
+captured [amzn-wanfe] from /home/user/.aws/credentials
 ```
 
 ### Secret ID validation
@@ -871,6 +923,7 @@ Valid:
 ```text
 ssh.main_private_key
 aws.primary_account.key_file
+aws.profile.amzn-wanfe
 cloudflare.dns_api_token
 ```
 
@@ -880,14 +933,14 @@ Invalid:
 ssh/main_private_key
 ../ssh.key
 SSH.Main
-ssh.main-private-key
+aws.profile.-foo
 ssh main
 ```
 
-Regex:
+Regex (hyphens allowed inside segments since v1.3, superseding the original v1.0 charset):
 
 ```text
-^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$
+^[a-z][a-z0-9_-]*(\.[a-z][a-z0-9_-]*)+$
 ```
 
 ### Destination inference
@@ -1096,7 +1149,8 @@ find bundles/<host_id>.age
 decrypt with host identity
 find secret-id in bundle
 if --stdout, print content only
-else install according to bundle metadata
+else dispatch on kind: file -> whole-file install, aws_profile -> section merge (7.5)
+unknown kind -> install error suggesting a kauket upgrade
 write installed state
 ```
 
@@ -1147,6 +1201,23 @@ No approved bundle yet:
 no approved bundle found for this machine
 request is pending or has not been approved
 ```
+
+For `aws_profile` secrets, per merged file:
+
+```text
+syncing store
+updating ~/.aws/config
+creating ~/.aws/credentials
+```
+
+Already current:
+
+```text
+syncing store
+profile amzn-wanfe already current
+```
+
+`--stdout`, `--inspect`, and `--as-host` print the raw stored JSON envelope.
 
 ## 6.7 `kauket list`
 
@@ -1260,10 +1331,49 @@ With `--backup`:
       "expanded_destination": "/home/gonzalo/.ssh/main_private_key",
       "sha256": "hex",
       "installed_at": "2026-05-24T00:00:00Z"
+    },
+    "aws.profile.amzn-wanfe": {
+      "destination": "~/.aws/config, ~/.aws/credentials",
+      "expanded_destination": "/home/gonzalo/.aws/config, /home/gonzalo/.aws/credentials",
+      "sha256": "hex of envelope",
+      "installed_at": "2026-07-27T00:00:00Z",
+      "sections": {
+        "config|amzn-wanfe": "hex of normalized section",
+        "config|sso-session amzn": "hex",
+        "credentials|amzn-wanfe": "hex"
+      }
     }
   }
 }
 ```
+
+`sections` is present only for `aws_profile` secrets (since v1.3); legacy entries
+without it remain valid.
+
+## 7.5 Section merge installation (`aws_profile`)
+
+`aws_profile` secrets are not installed as whole files. The envelope's `config`
+and `credentials` texts are merged section-by-section into the client's
+`$AWS_CONFIG_FILE` (default `~/.aws/config`) and `$AWS_SHARED_CREDENTIALS_FILE`
+(default `~/.aws/credentials`):
+
+```text
+a section named like an incoming one is replaced (first occurrence; later duplicates removed)
+a section not present is appended, separated by a blank line
+[profile X] and [X] headers are equivalent in config files; matching is case-sensitive
+all other bytes (other sections, comments, formatting) are preserved verbatim
+files are written atomically; existing file modes are preserved (0600/0700 on create)
+symlink rules from 7.2 apply to both target files
+```
+
+The merge is planned for both files before either is written: if any target
+fails, neither file is modified.
+
+Existing-section protection mirrors 7.3 at section granularity: replacing a
+same-named section whose content differs and which kauket did not install
+(per the `sections` hashes in installed state) fails unless `--force` or
+`--backup` (whole-file backup) is given. Re-running against already-merged
+files reports `profile <name> already current` and writes nothing.
 
 ---
 
@@ -1650,7 +1760,7 @@ ssh/main_private_key                invalid
 ../ssh.main_private_key             invalid
 ssh..main                           invalid
 SSH.main                            invalid
-ssh.main-private-key                invalid
+ssh.main-private-key                valid (since v1.3)
 ssh main                            invalid
 ```
 

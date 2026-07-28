@@ -16,10 +16,11 @@ type State struct {
 }
 
 type Entry struct {
-	Destination         string `json:"destination"`
-	ExpandedDestination string `json:"expanded_destination"`
-	SHA256              string `json:"sha256"`
-	InstalledAt         string `json:"installed_at"`
+	Destination         string            `json:"destination"`
+	ExpandedDestination string            `json:"expanded_destination"`
+	SHA256              string            `json:"sha256"`
+	InstalledAt         string            `json:"installed_at"`
+	Sections            map[string]string `json:"sections,omitempty"`
 }
 
 func statePath(home string) string {

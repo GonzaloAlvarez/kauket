@@ -124,7 +124,49 @@ func runGet(ctx context.Context, a *app.App, f *getFlags, secretID string) error
 		return nil
 	}
 
-	return installSecret(a, home, secretID, content, secret, f)
+	switch secret.Kind {
+	case "", "file":
+		return installSecret(a, home, secretID, content, secret, f)
+	case "aws_profile":
+		return installAWSProfileSecret(a, home, secretID, content, f)
+	default:
+		return &ExitError{Code: ExitInstall, Err: fmt.Errorf("kauket: secret %s has unsupported kind %q; upgrade kauket", secretID, secret.Kind)}
+	}
+}
+
+func installAWSProfileSecret(a *app.App, home, secretID string, content []byte, f *getFlags) error {
+	now := a.Now
+	if now == nil {
+		now = time.Now
+	}
+	opts := install.Options{
+		Home:   home,
+		Force:  f.force,
+		Backup: f.backup,
+		Now:    now,
+	}
+	res, err := install.InstallAWSProfile(secretID, content, opts)
+	if err != nil {
+		return translateInstallError(err)
+	}
+	changed := false
+	for _, fr := range res.Files {
+		switch fr.Status {
+		case install.StatusCreated:
+			changed = true
+			a.UI.Println(fmt.Sprintf("creating %s", fr.Destination))
+		case install.StatusReplaced, install.StatusBackedUpAndReplaced:
+			changed = true
+			if fr.BackupPath != "" {
+				a.UI.Println(fmt.Sprintf("backup created %s", fr.BackupPath))
+			}
+			a.UI.Println(fmt.Sprintf("updating %s", fr.Destination))
+		}
+	}
+	if !changed {
+		a.UI.Println(fmt.Sprintf("profile %s already current", res.Profile))
+	}
+	return nil
 }
 
 func runGetSync(ctx context.Context, a *app.App, home string, cfg *config.Client, stdoutMode bool) error {
@@ -362,6 +404,9 @@ func translateInstallSpec(m model.InstallSpec) (install.InstallSpec, error) {
 }
 
 func translateInstallError(err error) error {
+	if errors.Is(err, install.ErrUnmanagedSection) {
+		return &ExitError{Code: ExitInstall, Err: err}
+	}
 	if errors.Is(err, install.ErrUnmanagedDestination) {
 		return &ExitError{Code: ExitInstall, Err: errors.New("destination exists and was not installed by kauket")}
 	}
