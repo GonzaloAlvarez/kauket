@@ -73,6 +73,30 @@ func runGet(ctx context.Context, a *app.App, f *getFlags, secretID string) error
 		return runInspectHost(ctx, a, f, secretID, f.asHost, adminHome)
 	}
 
+	_, clientExists, err := resolveRoleHome(a, config.RoleClient)
+	if err != nil {
+		return &ExitError{Code: ExitUsage, Err: err}
+	}
+	if !clientExists {
+		adminHome, adminExists, err := resolveRoleHome(a, config.RoleAdmin)
+		if err != nil {
+			return &ExitError{Code: ExitUsage, Err: err}
+		}
+		if adminExists {
+			adminCfg, err := config.LoadAdmin(adminHome)
+			if err != nil {
+				return &ExitError{Code: ExitUsage, Err: err}
+			}
+			if !f.noSync {
+				if err := syncAdmin(ctx, a, adminHome); err != nil {
+					return err
+				}
+			}
+			if isV2Store(config.RepoDir(adminHome)) {
+				return getV2(a, adminHome, adminCfg.Admin.IdentityPath, adminCfg.V2, f, secretID)
+			}
+		}
+	}
 	home, err := requireRoleHome(a, config.RoleClient, "kauket get")
 	if err != nil {
 		return err
@@ -87,6 +111,10 @@ func runGet(ctx context.Context, a *app.App, f *getFlags, secretID string) error
 		if err := runGetSync(ctx, a, home, cfg, f.stdout); err != nil {
 			return err
 		}
+	}
+
+	if isV2Store(config.RepoDir(home)) {
+		return getV2(a, home, cfg.Host.IdentityPath, cfg.V2, f, secretID)
 	}
 
 	bundlePath := filepath.Join(config.RepoDir(home), "bundles", cfg.Host.ID+".age")

@@ -62,6 +62,9 @@ func listAdmin(a *app.App, home string) error {
 	if err != nil {
 		return &ExitError{Code: ExitUsage, Err: err}
 	}
+	if isV2Store(config.RepoDir(home)) {
+		return listV2(a, home, cfg.Admin.IdentityPath, cfg.V2)
+	}
 	vaultPath := filepath.Join(config.RepoDir(home), "admin", "vault.age")
 	ct, err := os.ReadFile(vaultPath)
 	if err != nil {
@@ -92,6 +95,9 @@ func listClient(a *app.App, home string) error {
 	cfg, err := config.LoadClient(home)
 	if err != nil {
 		return &ExitError{Code: ExitUsage, Err: err}
+	}
+	if isV2Store(config.RepoDir(home)) {
+		return listV2(a, home, cfg.Host.IdentityPath, cfg.V2)
 	}
 	bundlePath := filepath.Join(config.RepoDir(home), "bundles", cfg.Host.ID+".age")
 	ct, err := os.ReadFile(bundlePath)

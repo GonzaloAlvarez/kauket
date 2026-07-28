@@ -38,6 +38,8 @@ type initFlags struct {
 	noGitHub      bool
 	adminIdentity string
 	yes           bool
+	v2            bool
+	recoveryOut   string
 }
 
 func NewInit(a *app.App) *cobra.Command {
@@ -56,12 +58,17 @@ func NewInit(a *app.App) *cobra.Command {
 	cmd.Flags().BoolVar(&f.noGitHub, "no-github", false, "Skip GitHub API; use the --remote URL as-is")
 	cmd.Flags().StringVar(&f.adminIdentity, "admin-identity", "", "Path to an existing age identity to import")
 	cmd.Flags().BoolVar(&f.yes, "yes", false, "Noninteractive")
+	cmd.Flags().BoolVar(&f.v2, "v2", false, "Create a schema-2 namespace store")
+	cmd.Flags().StringVar(&f.recoveryOut, "recovery-out", "", "Directory to write the offline recovery key pair (required with --v2)")
 	return cmd
 }
 
 func runInit(ctx context.Context, a *app.App, f *initFlags) error {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if f.v2 {
+		return runInitV2(ctx, a, f)
 	}
 	home, _, err := resolveRoleHome(a, config.RoleAdmin)
 	if err != nil {

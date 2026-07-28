@@ -43,6 +43,11 @@ type HostInfo struct {
 	DeployKeyPath string `json:"deploy_key_path"`
 }
 
+type V2Local struct {
+	IdentityID  string `json:"identity_id"`
+	SignKeyPath string `json:"sign_key_path"`
+}
+
 type Admin struct {
 	Schema       int          `json:"schema"`
 	Role         Role         `json:"role"`
@@ -50,6 +55,7 @@ type Admin struct {
 	Repo         RepoInfo     `json:"repo"`
 	Admin        AdminInfo    `json:"admin"`
 	CommitAuthor CommitAuthor `json:"commit_author"`
+	V2           *V2Local     `json:"v2,omitempty"`
 }
 
 type Client struct {
@@ -59,6 +65,7 @@ type Client struct {
 	Host         HostInfo     `json:"host"`
 	Repo         RepoInfo     `json:"repo"`
 	CommitAuthor CommitAuthor `json:"commit_author"`
+	V2           *V2Local     `json:"v2,omitempty"`
 }
 
 var (
