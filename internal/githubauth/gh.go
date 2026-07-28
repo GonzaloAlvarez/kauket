@@ -80,7 +80,7 @@ func (p *GHCLIProvider) Token(ctx context.Context, scopes []string) (string, err
 	}
 
 	tokenArgs := []string{"auth", "token", "--hostname", ghHost}
-	if account.Name != "" {
+	if account.Name != "" && !account.EnvToken {
 		tokenArgs = append(tokenArgs, "--user", account.Name)
 	}
 	tokenOut, _, tokenRunErr := p.run(ctx, sh, tokenArgs...)
@@ -98,9 +98,10 @@ func (p *GHCLIProvider) Token(ctx context.Context, scopes []string) (string, err
 }
 
 type ghAccount struct {
-	Name   string
-	Active bool
-	Scopes []string
+	Name     string
+	Active   bool
+	EnvToken bool
+	Scopes   []string
 }
 
 func parseAuthStatus(out []byte, host string) ([]ghAccount, error) {
@@ -136,7 +137,7 @@ func parseAuthStatus(out []byte, host string) ([]ghAccount, error) {
 
 		if strings.Contains(trimmed, "Logged in to "+host) {
 			flush()
-			current = &ghAccount{Name: accountName(trimmed)}
+			current = &ghAccount{Name: accountName(trimmed), EnvToken: envTokenSource(trimmed)}
 			continue
 		}
 		if current == nil {
@@ -157,6 +158,15 @@ func parseAuthStatus(out []byte, host string) ([]ghAccount, error) {
 	}
 	flush()
 	return accounts, nil
+}
+
+func envTokenSource(line string) bool {
+	fields := strings.Fields(line)
+	if len(fields) == 0 {
+		return false
+	}
+	last := fields[len(fields)-1]
+	return last == "(GH_TOKEN)" || last == "(GITHUB_TOKEN)"
 }
 
 func accountName(line string) string {

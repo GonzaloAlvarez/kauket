@@ -416,3 +416,31 @@ func equalStrings(a, b []string) bool {
 	}
 	return true
 }
+
+const sampleAuthStatusEnvToken = `github.com
+  ✓ Logged in to github.com account GonzaloAlvarez (GH_TOKEN)
+  - Active account: true
+  - Git operations protocol: https
+  - Token: gho_************************************
+  - Token scopes: 'gist', 'read:org', 'repo', 'admin:public_key'
+`
+
+func TestGHCLIProviderEnvTokenSkipsUserFlag(t *testing.T) {
+	sh := &MockShell{RunOutputs: map[string]MockRun{
+		authStatusCmd:                         {Stdout: []byte(sampleAuthStatusEnvToken)},
+		"gh auth token --hostname github.com": {Stdout: []byte(fakeGHToken + "\n")},
+	}}
+	p := &GHCLIProvider{Shell: sh}
+	tok, err := p.Token(context.Background(), []string{"repo"})
+	if err != nil {
+		t.Fatalf("Token: %v", err)
+	}
+	if tok != fakeGHToken {
+		t.Fatalf("token = %q", tok)
+	}
+	for _, call := range sh.Calls {
+		if strings.Contains(call, "--user") {
+			t.Fatalf("env-token auth must not pass --user, calls: %v", sh.Calls)
+		}
+	}
+}
