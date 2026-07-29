@@ -177,3 +177,88 @@ func TestGitHubMigrateStoreJourney(t *testing.T) {
 		t.Fatalf("leak scan: %v", err)
 	}
 }
+
+func TestGitHubWriteJourney(t *testing.T) {
+	owner, cleanupRepo := githubJourneySetup(t)
+	skipSSH := os.Getenv("KAUKET_GITHUB_E2E_SKIP_SSH") == "1"
+	repo := fmt.Sprintf("kauket-e2e-%d", time.Now().UnixNano())
+	repoSlug := owner + "/" + repo
+	bin := buildBinary(t)
+	defer cleanupRepo(repoSlug)
+
+	root := mustResolvedTempRoot(t)
+	adminHome := filepath.Join(root, "admin-home")
+	adminKauket := filepath.Join(adminHome, ".config", "kauket")
+	clientHome := filepath.Join(root, "client-home")
+	clientKauket := filepath.Join(clientHome, ".config", "kauket")
+	mustMkdir(t, adminHome, 0o700)
+	mustMkdir(t, clientHome, 0o700)
+
+	res := runKauket(t, bin, adminKauket, adminHome, "init", "--owner", owner, "--repo", repo, "--private", "--yes")
+	if res.err != nil {
+		t.Fatalf("init: %v\nstderr:%s", res.err, res.stderr)
+	}
+	seed := filepath.Join(adminHome, "src", "seed")
+	mustMkdir(t, filepath.Dir(seed), 0o700)
+	if err := os.WriteFile(seed, []byte("SEED CONTENT"), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	res = runKauket(t, bin, adminKauket, adminHome, "add", "ssh.main_private_key", seed)
+	if res.err != nil {
+		t.Fatalf("v1 add: %v\nstderr:%s", res.err, res.stderr)
+	}
+	res = runKauket(t, bin, clientKauket, clientHome, "enroll", "--repo", repoSlug, "--request", "ssh", "--name", randomEnrollName(), "--yes")
+	if res.err != nil {
+		t.Fatalf("enroll: %v\nstderr:%s", res.err, res.stderr)
+	}
+	res = runKauket(t, bin, adminKauket, adminHome, "approve", "--all", "--yes")
+	if res.err != nil {
+		t.Fatalf("approve: %v\nstderr:%s", res.err, res.stderr)
+	}
+	res = runKauket(t, bin, adminKauket, adminHome, "migrate-store", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
+	if res.err != nil {
+		t.Fatalf("migrate-store: %v\nstderr:%s", res.err, res.stderr)
+	}
+
+	hostID := readHostID(t, clientKauket)
+	token := filepath.Join(adminHome, "src", "token")
+	if err := os.WriteFile(token, []byte("JOURNEY TOKEN"), 0o600); err != nil {
+		t.Fatalf("token: %v", err)
+	}
+	res = runKauket(t, bin, adminKauket, adminHome, "add", "cloud.vendor.api_token", token, "--dest", "/etc/cloud/token")
+	if res.err != nil {
+		t.Fatalf("v2 add: %v\nstderr:%s", res.err, res.stderr)
+	}
+	res = runKauket(t, bin, adminKauket, adminHome, "grant", hostID, "cloud/vendor")
+	if res.err != nil {
+		t.Fatalf("grant: %v\nstderr:%s", res.err, res.stderr)
+	}
+
+	if !skipSSH {
+		res = runKauket(t, bin, clientKauket, clientHome, "get", "cloud.vendor.api_token", "--stdout")
+		if res.err != nil || res.stdout != "JOURNEY TOKEN" {
+			t.Fatalf("client SSH get: err=%v out=%q stderr=%s", res.err, res.stdout, res.stderr)
+		}
+	}
+
+	res = runKauket(t, bin, adminKauket, adminHome, "revoke", hostID, "cloud/vendor")
+	if res.err != nil {
+		t.Fatalf("revoke: %v\nstderr:%s", res.err, res.stderr)
+	}
+	if !strings.Contains(res.stdout, "rotate these secrets") {
+		t.Fatalf("revoke output: %q", res.stdout)
+	}
+	if !skipSSH {
+		res = runKauket(t, bin, clientKauket, clientHome, "get", "cloud.vendor.api_token", "--stdout")
+		if res.err == nil || exitCodeOf(res.err) != 5 {
+			t.Fatalf("post-revoke get should exit 5, got %v", res.err)
+		}
+	}
+	res = runKauket(t, bin, adminKauket, adminHome, "verify")
+	if res.err != nil {
+		t.Fatalf("verify: %v\nstderr:%s", res.err, res.stderr)
+	}
+	if err := runLeakScan(t, filepath.Join(roleHomePath(adminKauket, "admin"), "repo")); err != nil {
+		t.Fatalf("leak scan: %v", err)
+	}
+}

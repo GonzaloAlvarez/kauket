@@ -180,6 +180,10 @@ func runAdd(ctx context.Context, a *app.App, f *addFlags, secretID, sourcePath s
 		profileList = []string{inferred}
 	}
 
+	if isV2Store(config.RepoDir(home)) {
+		return runAddV2(ctx, a, home, cfg, f, secretID, content, spec, kind)
+	}
+
 	transport, err := buildAdminSyncTransport(ctx, a, cfg.Repo.RemoteHTTPS, cfg.Repo.Owner)
 	if err != nil {
 		return &ExitError{Code: ExitSync, Err: err}
@@ -205,6 +209,13 @@ func runAdd(ctx context.Context, a *app.App, f *addFlags, secretID, sourcePath s
 
 	if err := store.Sync(ctx); err != nil {
 		return &ExitError{Code: ExitSync, Err: err}
+	}
+
+	if isV2Store(config.RepoDir(home)) {
+		if err := store.Close(); err != nil {
+			return &ExitError{Code: ExitSync, Err: err}
+		}
+		return runAddV2(ctx, a, home, cfg, f, secretID, content, spec, kind)
 	}
 
 	identityPath := cfg.Admin.IdentityPath
