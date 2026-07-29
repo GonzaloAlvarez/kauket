@@ -465,3 +465,92 @@ func TestGitHubMultiOwnerJourney(t *testing.T) {
 		t.Fatalf("leak scan: %v", err)
 	}
 }
+
+func TestGitHubRescueJourney(t *testing.T) {
+	owner, cleanupRepo := githubJourneySetup(t)
+	skipSSH := os.Getenv("KAUKET_GITHUB_E2E_SKIP_SSH") == "1"
+	repo := fmt.Sprintf("kauket-e2e-%d", time.Now().UnixNano())
+	repoSlug := owner + "/" + repo
+	bin := buildBinary(t)
+	defer cleanupRepo(repoSlug)
+
+	root := mustResolvedTempRoot(t)
+	founderHome := filepath.Join(root, "founder-home")
+	founderKauket := filepath.Join(founderHome, ".config", "kauket")
+	userHome := filepath.Join(root, "user-home")
+	userKauket := filepath.Join(userHome, ".config", "kauket")
+	mustMkdir(t, founderHome, 0o700)
+	mustMkdir(t, userHome, 0o700)
+	recoveryOut := filepath.Join(root, "recovery")
+
+	res := runKauket(t, bin, founderKauket, founderHome, "init", "--v2", "--recovery-out", recoveryOut,
+		"--owner", owner, "--repo", repo, "--private", "--yes")
+	if res.err != nil {
+		t.Fatalf("init --v2: %v\nstderr:%s", res.err, res.stderr)
+	}
+	src := filepath.Join(founderHome, "src", "token")
+	mustMkdir(t, filepath.Dir(src), 0o700)
+	if err := os.WriteFile(src, []byte("RESCUE JOURNEY TOKEN"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	res = runKauket(t, bin, founderKauket, founderHome, "add", "cloud.vendor.api_token", src, "--dest", "/etc/cloud/token")
+	if res.err != nil {
+		t.Fatalf("add: %v\nstderr:%s", res.err, res.stderr)
+	}
+
+	res = runKauket(t, bin, userKauket, userHome, "join", "--repo", repoSlug, "--request", "cloud/vendor", "--name", "successor", "--yes")
+	if res.err != nil {
+		t.Fatalf("join: %v\nstderr:%s", res.err, res.stderr)
+	}
+	res = runKauket(t, bin, founderKauket, founderHome, "approve", "--all", "--yes")
+	if res.err != nil {
+		t.Fatalf("approve: %v\nstderr:%s", res.err, res.stderr)
+	}
+
+	userID := ""
+	userCfgBytes, err := os.ReadFile(filepath.Join(roleHomePath(userKauket, "admin"), "config.json"))
+	if err != nil {
+		t.Fatalf("read user config: %v", err)
+	}
+	for _, line := range strings.Split(string(userCfgBytes), "\n") {
+		if strings.Contains(line, `"identity_id"`) {
+			userID = strings.Split(line, `"`)[3]
+		}
+	}
+	if !strings.HasPrefix(userID, "i_") {
+		t.Fatalf("user id not found")
+	}
+
+	res = runKauket(t, bin, founderKauket, founderHome, "rescue", "cloud/vendor",
+		"--recovery-identity", filepath.Join(recoveryOut, "recovery-age.txt"),
+		"--recovery-sign-key", filepath.Join(recoveryOut, "recovery-sign.key"),
+		"--new-owner", userID)
+	if res.err != nil {
+		t.Fatalf("rescue: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
+	}
+	if !strings.Contains(res.stdout, "rescued cloud/vendor") {
+		t.Fatalf("rescue output: %q", res.stdout)
+	}
+
+	res = runKauket(t, bin, founderKauket, founderHome, "inspect", "--as", userID)
+	if res.err != nil {
+		t.Fatalf("inspect: %v\nstderr:%s", res.err, res.stderr)
+	}
+	if !strings.Contains(res.stdout, "cloud.vendor.api_token") {
+		t.Fatalf("inspect output: %q", res.stdout)
+	}
+
+	if !skipSSH {
+		res = runKauket(t, bin, userKauket, userHome, "get", "cloud.vendor.api_token", "--stdout")
+		if res.err != nil || res.stdout != "RESCUE JOURNEY TOKEN" {
+			t.Fatalf("new owner get: err=%v out=%q stderr=%s", res.err, res.stdout, res.stderr)
+		}
+	}
+	res = runKauket(t, bin, founderKauket, founderHome, "verify")
+	if res.err != nil {
+		t.Fatalf("verify: %v\nstderr:%s", res.err, res.stderr)
+	}
+	if err := runLeakScan(t, filepath.Join(roleHomePath(founderKauket, "admin"), "repo")); err != nil {
+		t.Fatalf("leak scan: %v", err)
+	}
+}

@@ -68,12 +68,15 @@ func verifyNode(f ManifestFile, root StoreRoot, parent *ManifestBody, pins *Pins
 			return err
 		}
 	} else {
-		var attested []string
+		attested := make([]string, 0, len(parent.Children))
 		for _, c := range parent.Children {
 			if c.NodeID == f.Body.NodeID {
-				attested = c.OwnerSignKeys
+				attested = append(attested, c.OwnerSignKeys...)
 				break
 			}
+		}
+		for _, r := range root.Recovery {
+			attested = append(attested, r.SignPubkey)
 		}
 		if len(attested) == 0 {
 			return fmt.Errorf("%w: node %s not attested by parent %s", ErrUnattestedChild, f.Body.NodeID, parent.NodeID)

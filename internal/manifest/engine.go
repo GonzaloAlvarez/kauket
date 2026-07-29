@@ -44,7 +44,12 @@ type Engine struct {
 	Signer     bundle.Signer
 	SignerPub  string
 	ActorID    string
+	AsRecovery bool
 	Now        func() time.Time
+}
+
+func (e *Engine) canSign(body ManifestBody) bool {
+	return e.AsRecovery || ownsNode(body, e.SignerPub)
 }
 
 func (e *Engine) recovery() []string {
@@ -140,7 +145,7 @@ func (e *Engine) applyAdd(state *engineState, in Intent) (*Plan, error) {
 		return nil, err
 	}
 	attachID := spine[len(spine)-1]
-	if !ownsNode(state.tree[attachID], e.SignerPub) {
+	if !e.canSign(state.tree[attachID]) {
 		return nil, fmt.Errorf("%w: %s", ErrNotOwner, pathName(state.tree, attachID))
 	}
 
@@ -245,7 +250,7 @@ func (e *Engine) applyGrant(state *engineState, in Intent) (*Plan, error) {
 		return nil, err
 	}
 	body := state.tree[nodeID]
-	if !ownsNode(body, e.SignerPub) {
+	if !e.canSign(body) {
 		return nil, fmt.Errorf("%w: %s", ErrNotOwner, pathName(state.tree, nodeID))
 	}
 	member := Member{IID: in.Identity.ID, AgeRecipient: in.Identity.AgeRecipient}
@@ -312,7 +317,7 @@ func (e *Engine) applyGrantOwner(state *engineState, in Intent, nodeID string, i
 	state.tree[nodeID] = body
 
 	resigned := map[string]bool{nodeID: true}
-	if body.ParentID != "" {
+	if body.ParentID != "" && !e.AsRecovery {
 		parent, ok := state.tree[body.ParentID]
 		if !ok {
 			return nil, fmt.Errorf("%w: parent %s", ErrNotFound, body.ParentID)
@@ -385,7 +390,7 @@ func (e *Engine) applyRevoke(state *engineState, in Intent) (*Plan, error) {
 		return nil, err
 	}
 	body := state.tree[nodeID]
-	if !ownsNode(body, e.SignerPub) {
+	if !e.canSign(body) {
 		return nil, fmt.Errorf("%w: %s", ErrNotOwner, pathName(state.tree, nodeID))
 	}
 

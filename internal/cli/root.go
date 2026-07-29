@@ -29,6 +29,8 @@ func NewRoot(a *app.App) *cobra.Command {
 		NewRevoke(a),
 		NewRequest(a),
 		NewJoin(a),
+		NewRescue(a),
+		NewInspect(a),
 	)
 	return root
 }
