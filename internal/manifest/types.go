@@ -112,8 +112,9 @@ type StoreGitHub struct {
 }
 
 type TrustAnchor struct {
-	IID        string `json:"i_id"`
-	SignPubkey string `json:"sign_pubkey"`
+	IID          string `json:"i_id"`
+	SignPubkey   string `json:"sign_pubkey"`
+	AgeRecipient string `json:"age_recipient,omitempty"`
 }
 
 type RecoveryKey struct {

@@ -119,6 +119,10 @@ func runApprove(ctx context.Context, a *app.App, f *approveFlags) error {
 		return &ExitError{Code: ExitSync, Err: err}
 	}
 
+	if isV2Store(config.RepoDir(home)) {
+		return runApproveV2(ctx, a, home, cfg, f, store, useGitHub, token, now)
+	}
+
 	a.UI.Println("fetching pending requests")
 	refs, err := store.FetchRequestRefs(ctx)
 	if err != nil {

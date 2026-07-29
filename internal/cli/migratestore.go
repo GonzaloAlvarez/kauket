@@ -251,7 +251,7 @@ func runMigrateStore(ctx context.Context, a *app.App, f *migrateStoreFlags) erro
 		Format:       manifest.DefaultStoreFormat(),
 		GitHub:       manifest.StoreGitHub{Owner: cfg.Repo.Owner, Repo: cfg.Repo.Name, DefaultBranch: cfg.Repo.DefaultBranch},
 		RootNodeID:   root.id,
-		TrustAnchors: []manifest.TrustAnchor{{IID: founderID, SignPubkey: signPub}},
+		TrustAnchors: []manifest.TrustAnchor{{IID: founderID, SignPubkey: signPub, AgeRecipient: founderRecipient}},
 		Recovery:     []manifest.RecoveryKey{{AgeRecipient: recoveryRecipient, SignPubkey: recoverySignPub}},
 		FrozenV1:     true,
 	}

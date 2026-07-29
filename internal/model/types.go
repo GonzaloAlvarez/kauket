@@ -80,6 +80,7 @@ type Request struct {
 
 type RequestHost struct {
 	ID                 string `json:"id"`
+	Kind               string `json:"kind,omitempty"`
 	DisplayName        string `json:"display_name"`
 	ReportedHostname   string `json:"reported_hostname"`
 	OS                 string `json:"os"`
@@ -91,6 +92,7 @@ type RequestHost struct {
 type RequestedItems struct {
 	Profiles []string `json:"profiles"`
 	Secrets  []string `json:"secrets"`
+	Paths    []string `json:"paths,omitempty"`
 }
 
 type RequestSignature struct {

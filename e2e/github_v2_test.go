@@ -262,3 +262,105 @@ func TestGitHubWriteJourney(t *testing.T) {
 		t.Fatalf("leak scan: %v", err)
 	}
 }
+
+func TestGitHubRequestJourney(t *testing.T) {
+	owner, cleanupRepo := githubJourneySetup(t)
+	skipSSH := os.Getenv("KAUKET_GITHUB_E2E_SKIP_SSH") == "1"
+	repo := fmt.Sprintf("kauket-e2e-%d", time.Now().UnixNano())
+	repoSlug := owner + "/" + repo
+	bin := buildBinary(t)
+	defer cleanupRepo(repoSlug)
+
+	root := mustResolvedTempRoot(t)
+	founderHome := filepath.Join(root, "founder-home")
+	founderKauket := filepath.Join(founderHome, ".config", "kauket")
+	clientHome := filepath.Join(root, "client-home")
+	clientKauket := filepath.Join(clientHome, ".config", "kauket")
+	mustMkdir(t, founderHome, 0o700)
+	mustMkdir(t, clientHome, 0o700)
+
+	res := runKauket(t, bin, founderKauket, founderHome, "init", "--v2", "--recovery-out", filepath.Join(root, "recovery"),
+		"--owner", owner, "--repo", repo, "--private", "--yes")
+	if res.err != nil {
+		t.Fatalf("init --v2: %v\nstderr:%s", res.err, res.stderr)
+	}
+	first := filepath.Join(founderHome, "src", "first")
+	second := filepath.Join(founderHome, "src", "second")
+	mustMkdir(t, filepath.Dir(first), 0o700)
+	if err := os.WriteFile(first, []byte("FIRST SECRET"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.WriteFile(second, []byte("SECOND SECRET"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	res = runKauket(t, bin, founderKauket, founderHome, "add", "cloud.vendor.api_token", first, "--dest", "/etc/cloud/token")
+	if res.err != nil {
+		t.Fatalf("add first: %v\nstderr:%s", res.err, res.stderr)
+	}
+	res = runKauket(t, bin, founderKauket, founderHome, "add", "other.area.second_secret", second, "--dest", "/etc/second")
+	if res.err != nil {
+		t.Fatalf("add second: %v\nstderr:%s", res.err, res.stderr)
+	}
+
+	res = runKauket(t, bin, clientKauket, clientHome, "enroll", "--repo", repoSlug, "--request", "cloud/vendor", "--name", randomEnrollName(), "--yes")
+	if res.err != nil {
+		t.Fatalf("v2 enroll: %v\nstderr:%s", res.err, res.stderr)
+	}
+	if !strings.Contains(res.stdout, "requested paths: cloud/vendor") {
+		t.Fatalf("enroll output: %q", res.stdout)
+	}
+	res = runKauket(t, bin, founderKauket, founderHome, "approve", "--all", "--yes")
+	if res.err != nil {
+		t.Fatalf("approve enrollment: %v\nstderr:%s", res.err, res.stderr)
+	}
+
+	keys, err := ghListDeployKeys(t, repoSlug)
+	if err != nil {
+		t.Fatalf("list deploy keys: %v", err)
+	}
+	foundKey := false
+	for _, k := range keys {
+		if strings.HasPrefix(k.Title, "kauket h_") && k.ReadOnly {
+			foundKey = true
+		}
+	}
+	if !foundKey {
+		t.Fatalf("no read-only kauket deploy key registered on v2 store; keys=%+v", keys)
+	}
+
+	if skipSSH {
+		t.Logf("KAUKET_GITHUB_E2E_SKIP_SSH=1; skipping SSH reads")
+		return
+	}
+	res = runKauket(t, bin, clientKauket, clientHome, "get", "cloud.vendor.api_token", "--stdout")
+	if res.err != nil || res.stdout != "FIRST SECRET" {
+		t.Fatalf("client get: err=%v out=%q stderr=%s", res.err, res.stdout, res.stderr)
+	}
+	res = runKauket(t, bin, clientKauket, clientHome, "get", "other.area.second_secret", "--stdout", "--no-sync")
+	if res.err == nil || exitCodeOf(res.err) != 5 {
+		t.Fatalf("unrequested secret should exit 5, got %v", res.err)
+	}
+
+	res = runKauket(t, bin, clientKauket, clientHome, "request", "other/area", "--yes")
+	if res.err != nil {
+		t.Fatalf("request: %v\nstderr:%s", res.err, res.stderr)
+	}
+	if !strings.Contains(res.stdout, "created access request rq_") {
+		t.Fatalf("request output: %q", res.stdout)
+	}
+	res = runKauket(t, bin, founderKauket, founderHome, "approve", "--all", "--yes")
+	if res.err != nil {
+		t.Fatalf("approve access request: %v\nstderr:%s", res.err, res.stderr)
+	}
+	res = runKauket(t, bin, clientKauket, clientHome, "get", "other.area.second_secret", "--stdout")
+	if res.err != nil || res.stdout != "SECOND SECRET" {
+		t.Fatalf("post-request get: err=%v out=%q stderr=%s", res.err, res.stdout, res.stderr)
+	}
+	res = runKauket(t, bin, clientKauket, clientHome, "verify", "--no-sync")
+	if res.err != nil {
+		t.Fatalf("client verify: %v\nstderr:%s", res.err, res.stderr)
+	}
+	if err := runLeakScan(t, filepath.Join(roleHomePath(founderKauket, "admin"), "repo")); err != nil {
+		t.Fatalf("leak scan: %v", err)
+	}
+}

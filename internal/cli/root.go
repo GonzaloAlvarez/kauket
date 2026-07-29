@@ -27,6 +27,8 @@ func NewRoot(a *app.App) *cobra.Command {
 		NewMigrateStore(a),
 		NewGrant(a),
 		NewRevoke(a),
+		NewRequest(a),
+		NewJoin(a),
 	)
 	return root
 }

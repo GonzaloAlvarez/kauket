@@ -154,7 +154,7 @@ func runInitV2(ctx context.Context, a *app.App, f *initFlags) error {
 		GitHub:     manifest.StoreGitHub{Owner: f.owner, Repo: f.repo, DefaultBranch: "main"},
 		RootNodeID: rootNodeID,
 		TrustAnchors: []manifest.TrustAnchor{
-			{IID: founderID, SignPubkey: signPub},
+			{IID: founderID, SignPubkey: signPub, AgeRecipient: recipient},
 		},
 		Recovery: []manifest.RecoveryKey{{AgeRecipient: recoveryRecipient, SignPubkey: recoverySignPub}},
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gonzaloalvarez/kauket/internal/model"
@@ -52,7 +53,42 @@ func goldenCases(t *testing.T) map[string][]byte {
 	}
 	out["routed_request.json"] = routedPayload
 
+	v1Request := model.Request{
+		Schema:    1,
+		StoreID:   "ks_fixturestore1234",
+		RequestID: "rq_fixturereq123456",
+		CreatedAt: "2026-07-28T00:00:00Z",
+		Host: model.RequestHost{
+			ID:                 "h_fixturehost12345",
+			DisplayName:        "machine2",
+			ReportedHostname:   "machine2.local",
+			OS:                 "linux",
+			Arch:               "amd64",
+			AgeRecipient:       "age1fixturehost",
+			GitDeployPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixtureDeployKey0000000000000000000000",
+		},
+		Requested: model.RequestedItems{Profiles: []string{"ssh"}},
+	}
+	v1Payload, err := model.MarshalCanonical(v1Request)
+	if err != nil {
+		t.Fatalf("canonical v1 request: %v", err)
+	}
+	out["v1_request_signable_payload.json"] = v1Payload
+
 	return out
+}
+
+func TestV1RequestCanonicalBytesHaveNoNewFields(t *testing.T) {
+	for name, payload := range goldenCases(t) {
+		if name != "v1_request_signable_payload.json" {
+			continue
+		}
+		for _, forbidden := range []string{`"paths"`, `"kind"`} {
+			if strings.Contains(string(payload), forbidden) {
+				t.Fatalf("v1 request canonical bytes gained %s; old signatures would break", forbidden)
+			}
+		}
+	}
 }
 
 func TestGoldenCanonicalBodies(t *testing.T) {

@@ -5,7 +5,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -150,9 +149,18 @@ func runEnroll(ctx context.Context, a *app.App, f *enrollFlags) error {
 		now = time.Now
 	}
 
-	repoMeta, err := fetchRepoJSON(ctx, a, remoteURL, transport, now)
+	repoMeta, storeRoot, err := fetchStoreDoc(ctx, a, remoteURL, transport, now)
 	if err != nil {
 		return &ExitError{Code: ExitSync, Err: err}
+	}
+	if storeRoot != nil {
+		effectiveOwner := owner
+		effectiveRepo := repoName
+		if strings.TrimSpace(f.repo) == "" && storeRoot.GitHub.Owner != "" {
+			effectiveOwner = storeRoot.GitHub.Owner
+			effectiveRepo = storeRoot.GitHub.Repo
+		}
+		return runEnrollV2(ctx, a, f, home, storeRoot, hostRecipient, deployPub, remoteURL, useGitHub, transport, now, effectiveOwner, effectiveRepo)
 	}
 
 	adminRecipients := make([]string, 0, len(repoMeta.AdminRecipients))
@@ -403,53 +411,6 @@ func writeFileMode(path string, data []byte, mode os.FileMode) error {
 		return fmt.Errorf("kauket: chmod %s: %w", path, err)
 	}
 	return nil
-}
-
-func fetchRepoJSON(ctx context.Context, a *app.App, remoteURL string, transport gitstore.Transport, now func() time.Time) (*repoJSON, error) {
-	tempDir, err := os.MkdirTemp("", "kauket-enroll-fetch-")
-	if err != nil {
-		return nil, fmt.Errorf("kauket: temp dir: %w", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	repoPath := filepath.Join(tempDir, "repo")
-	lockPath := filepath.Join(tempDir, "repo.lock")
-
-	newStore := a.NewStore
-	if newStore == nil {
-		newStore = gitstore.OpenOrClone
-	}
-	if transport == nil {
-		transport = gitstore.SelectTransport(remoteURL, "")
-	}
-	store, err := newStore(ctx, gitstore.Config{
-		RepoPath: repoPath,
-		URL:      remoteURL,
-		LockPath: lockPath,
-		Now:      now,
-	}, transport)
-	if err != nil {
-		return nil, fmt.Errorf("kauket: open remote for fetch: %w", err)
-	}
-	defer store.Close()
-
-	if err := store.Sync(ctx); err != nil {
-		return nil, fmt.Errorf("kauket: sync remote: %w", err)
-	}
-
-	repoJSONPath := filepath.Join(repoPath, "repo.json")
-	data, err := os.ReadFile(repoJSONPath)
-	if err != nil {
-		return nil, fmt.Errorf("kauket: read repo.json: %w", err)
-	}
-	var meta repoJSON
-	if err := json.Unmarshal(data, &meta); err != nil {
-		return nil, fmt.Errorf("kauket: parse repo.json: %w", err)
-	}
-	if meta.Schema == 0 || meta.StoreID == "" {
-		return nil, errors.New("kauket: repo.json present but does not look like a kauket store")
-	}
-	return &meta, nil
 }
 
 func pushEnrollmentRequest(ctx context.Context, a *app.App, home, remoteURL string, transport gitstore.Transport, requestID string, ct []byte, author gitstore.Author, now func() time.Time) error {
