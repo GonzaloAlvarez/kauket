@@ -217,3 +217,58 @@ func writeIdentityRecord(repoDir string, rec manifest.IdentityRecord) error {
 	data = append(data, '\n')
 	return writeRepoFile(filepath.Join(repoIdentitiesDir(repoDir), rec.ID+".json"), data)
 }
+
+func rewriteStoreRoot(repoDir, signKeyPath string, mutate func(*manifest.StoreRoot) error) error {
+	doc, err := os.ReadFile(storeRootPath(repoDir))
+	if err != nil {
+		return fmt.Errorf("kauket: read store.json: %w", err)
+	}
+	var root manifest.StoreRoot
+	if err := json.Unmarshal(doc, &root); err != nil {
+		return fmt.Errorf("kauket: parse store.json: %w", err)
+	}
+	if err := mutate(&root); err != nil {
+		return err
+	}
+	newDoc, newSig, err := manifest.SignStoreRoot(root, bundle.Ed25519FileSigner{Path: signKeyPath})
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(storeRootPath(repoDir), newDoc, 0o600); err != nil {
+		return fmt.Errorf("kauket: write store.json: %w", err)
+	}
+	if err := os.WriteFile(storeRootSigPath(repoDir), newSig, 0o600); err != nil {
+		return fmt.Errorf("kauket: write store.json.sig: %w", err)
+	}
+	return nil
+}
+
+func appendStoreAnchor(repoDir, signKeyPath string, rec manifest.IdentityRecord) error {
+	return rewriteStoreRoot(repoDir, signKeyPath, func(root *manifest.StoreRoot) error {
+		for _, t := range root.TrustAnchors {
+			if t.IID == rec.ID {
+				return nil
+			}
+		}
+		root.TrustAnchors = append(root.TrustAnchors, manifest.TrustAnchor{
+			IID: rec.ID, SignPubkey: rec.SSHEd25519Pubkey, AgeRecipient: rec.AgeRecipient,
+		})
+		return nil
+	})
+}
+
+func removeStoreAnchor(repoDir, signKeyPath, identityID string) error {
+	return rewriteStoreRoot(repoDir, signKeyPath, func(root *manifest.StoreRoot) error {
+		kept := root.TrustAnchors[:0]
+		for _, t := range root.TrustAnchors {
+			if t.IID != identityID {
+				kept = append(kept, t)
+			}
+		}
+		if len(kept) == 0 {
+			return errors.New("kauket: refusing to remove the last trust anchor")
+		}
+		root.TrustAnchors = kept
+		return nil
+	})
+}

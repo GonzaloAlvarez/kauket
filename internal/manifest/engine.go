@@ -26,6 +26,7 @@ type Intent struct {
 	Identity IdentityRecord
 	Secret   *Object
 	Force    bool
+	AsOwner  bool
 }
 
 type Plan struct {
@@ -252,6 +253,10 @@ func (e *Engine) applyGrant(state *engineState, in Intent) (*Plan, error) {
 		return nil, fmt.Errorf("kauket: identity %s has no age recipient", in.Identity.ID)
 	}
 
+	if in.AsOwner {
+		return e.applyGrantOwner(state, in, nodeID, ix, plan)
+	}
+
 	if in.Key != "" {
 		entry, ok := ix.Entries[in.Key]
 		if !ok {
@@ -290,6 +295,89 @@ func (e *Engine) applyGrant(state *engineState, in Intent) (*Plan, error) {
 	return plan, nil
 }
 
+func (e *Engine) applyGrantOwner(state *engineState, in Intent, nodeID string, ix *Index, plan *Plan) (*Plan, error) {
+	body := state.tree[nodeID]
+	if in.Identity.SSHEd25519Pubkey == "" {
+		return nil, fmt.Errorf("kauket: identity %s has no signing key and cannot be an owner", in.Identity.ID)
+	}
+	if ownerHas(body.Owners, in.Identity.ID) {
+		plan.NoOp = true
+		return plan, nil
+	}
+	newOwner := Owner{IID: in.Identity.ID, AgeRecipient: in.Identity.AgeRecipient, SignPubkey: in.Identity.SSHEd25519Pubkey}
+	body.Readers = removeMember(body.Readers, in.Identity.ID)
+	body.Owners = append(body.Owners, newOwner)
+	body.Version++
+	body.UpdatedAt = e.nowStr()
+	state.tree[nodeID] = body
+
+	resigned := map[string]bool{nodeID: true}
+	if body.ParentID != "" {
+		parent, ok := state.tree[body.ParentID]
+		if !ok {
+			return nil, fmt.Errorf("%w: parent %s", ErrNotFound, body.ParentID)
+		}
+		if !ownsNode(parent, e.SignerPub) {
+			return nil, fmt.Errorf("%w: adding an owner to %s requires an owner of its parent to attest", ErrNotOwner, pathName(state.tree, nodeID))
+		}
+		for i, c := range parent.Children {
+			if c.NodeID == nodeID {
+				parent.Children[i].OwnerSignKeys = append(parent.Children[i].OwnerSignKeys, newOwner.SignPubkey)
+			}
+		}
+		parent.Version++
+		parent.UpdatedAt = e.nowStr()
+		state.tree[body.ParentID] = parent
+		resigned[body.ParentID] = true
+	}
+
+	if err := e.reencodeNodeContent(state, nodeID, ix, plan, ""); err != nil {
+		return nil, err
+	}
+	if err := e.resignAndWrite(state, resigned, plan); err != nil {
+		return nil, err
+	}
+	if err := e.widenAncestors(state, nodeID, newOwner.AgeRecipient, plan); err != nil {
+		return nil, err
+	}
+	if err := e.widenSubtree(state, nodeID, newOwner.AgeRecipient, plan); err != nil {
+		return nil, err
+	}
+	return plan, nil
+}
+
+func (e *Engine) widenSubtree(state *engineState, nodeID, newRecipient string, plan *Plan) error {
+	for _, child := range state.tree[nodeID].Children {
+		file, ok := state.files[child.NodeID]
+		if !ok {
+			return fmt.Errorf("%w: child %s", ErrNotFound, child.NodeID)
+		}
+		has := false
+		for _, r := range file.Recipients {
+			if r == newRecipient {
+				has = true
+				break
+			}
+		}
+		if !has {
+			file.Recipients = append(file.Recipients, newRecipient)
+			sort.Strings(file.Recipients)
+			ct, _, err := EncodeManifest(file, agebox.X25519RecipientProvider{Strings: file.Recipients})
+			if err != nil {
+				return err
+			}
+			if err := e.writeFile(child.NodeID, ct, plan); err != nil {
+				return err
+			}
+			state.files[child.NodeID] = file
+		}
+		if err := e.widenSubtree(state, child.NodeID, newRecipient, plan); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (e *Engine) applyRevoke(state *engineState, in Intent) (*Plan, error) {
 	plan := &Plan{}
 	nodeID, ix, err := e.targetNode(state, in.Path)
@@ -299,6 +387,10 @@ func (e *Engine) applyRevoke(state *engineState, in Intent) (*Plan, error) {
 	body := state.tree[nodeID]
 	if !ownsNode(body, e.SignerPub) {
 		return nil, fmt.Errorf("%w: %s", ErrNotOwner, pathName(state.tree, nodeID))
+	}
+
+	if in.AsOwner {
+		return e.applyRevokeOwner(state, in, nodeID, ix, plan)
 	}
 
 	removed := false
@@ -352,6 +444,109 @@ func (e *Engine) applyRevoke(state *engineState, in Intent) (*Plan, error) {
 		return nil, err
 	}
 	return plan, nil
+}
+
+func (e *Engine) applyRevokeOwner(state *engineState, in Intent, nodeID string, ix *Index, plan *Plan) (*Plan, error) {
+	body := state.tree[nodeID]
+	if !ownerHas(body.Owners, in.Identity.ID) {
+		plan.NoOp = true
+		return plan, nil
+	}
+	if len(body.Owners) == 1 {
+		return nil, fmt.Errorf("kauket: refusing to remove the last owner of %s", pathName(state.tree, nodeID))
+	}
+	var removedKey string
+	kept := body.Owners[:0]
+	for _, o := range body.Owners {
+		if o.IID == in.Identity.ID {
+			removedKey = o.SignPubkey
+			continue
+		}
+		kept = append(kept, o)
+	}
+	body.Owners = kept
+	body.Version++
+	body.UpdatedAt = e.nowStr()
+	state.tree[nodeID] = body
+	for name := range ix.Entries {
+		plan.Rotation = append(plan.Rotation, pathName(state.tree, nodeID)+"/"+name)
+	}
+	sort.Strings(plan.Rotation)
+
+	resigned := map[string]bool{nodeID: true}
+	if body.ParentID != "" {
+		parent, ok := state.tree[body.ParentID]
+		if !ok {
+			return nil, fmt.Errorf("%w: parent %s", ErrNotFound, body.ParentID)
+		}
+		if !ownsNode(parent, e.SignerPub) {
+			return nil, fmt.Errorf("%w: removing an owner of %s requires an owner of its parent to attest", ErrNotOwner, pathName(state.tree, nodeID))
+		}
+		stillUsed := false
+		for _, o := range body.Owners {
+			if o.SignPubkey == removedKey {
+				stillUsed = true
+			}
+		}
+		if !stillUsed {
+			for i, c := range parent.Children {
+				if c.NodeID != nodeID {
+					continue
+				}
+				keptKeys := c.OwnerSignKeys[:0]
+				for _, k := range c.OwnerSignKeys {
+					if k != removedKey {
+						keptKeys = append(keptKeys, k)
+					}
+				}
+				parent.Children[i].OwnerSignKeys = keptKeys
+			}
+			parent.Version++
+			parent.UpdatedAt = e.nowStr()
+			state.tree[body.ParentID] = parent
+			resigned[body.ParentID] = true
+		}
+	}
+
+	if err := e.reencodeNodeContent(state, nodeID, ix, plan, ""); err != nil {
+		return nil, err
+	}
+	if err := e.resignAndWrite(state, resigned, plan); err != nil {
+		return nil, err
+	}
+	if err := e.shrinkAncestors(state, nodeID, plan); err != nil {
+		return nil, err
+	}
+	if err := e.shrinkSubtree(state, nodeID, plan); err != nil {
+		return nil, err
+	}
+	return plan, nil
+}
+
+func (e *Engine) shrinkSubtree(state *engineState, nodeID string, plan *Plan) error {
+	for _, child := range state.tree[nodeID].Children {
+		file, ok := state.files[child.NodeID]
+		if !ok {
+			return fmt.Errorf("%w: child %s", ErrNotFound, child.NodeID)
+		}
+		recipients, err := RecipientSet(ArtifactManifest, child.NodeID, "", state.tree, nil, e.recovery())
+		if err != nil {
+			return err
+		}
+		file.Recipients = recipients
+		ct, _, err := EncodeManifest(file, agebox.X25519RecipientProvider{Strings: recipients})
+		if err != nil {
+			return err
+		}
+		if err := e.writeFile(child.NodeID, ct, plan); err != nil {
+			return err
+		}
+		state.files[child.NodeID] = file
+		if err := e.shrinkSubtree(state, child.NodeID, plan); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (e *Engine) targetNode(state *engineState, path []string) (string, *Index, error) {
@@ -449,6 +644,7 @@ func (e *Engine) resignAndWrite(state *engineState, nodeIDs map[string]bool, pla
 			return err
 		}
 		state.tree[id] = signed
+		state.files[id] = ManifestFile{Body: signed, Recipients: recipients}
 		if e.Pins != nil && signed.Version > e.Pins.NodeVersions[id] {
 			e.Pins.NodeVersions[id] = signed.Version
 		}

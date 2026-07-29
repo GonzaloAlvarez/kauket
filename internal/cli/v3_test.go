@@ -35,7 +35,7 @@ func TestGrantRevokeRoundtrip(t *testing.T) {
 	}
 
 	adminFake.Lines = nil
-	if err := runGrant(context.Background(), adminApp, hostID, "aws/profile", ""); err != nil {
+	if err := runGrant(context.Background(), adminApp, hostID, "aws/profile", "", false, true); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
 	if !strings.Contains(strings.Join(adminFake.Lines, "\n"), "granted "+hostID) {
@@ -52,7 +52,7 @@ func TestGrantRevokeRoundtrip(t *testing.T) {
 	}
 
 	adminFake.Lines = nil
-	if err := runGrant(context.Background(), adminApp, hostID, "aws/profile", ""); err != nil {
+	if err := runGrant(context.Background(), adminApp, hostID, "aws/profile", "", false, true); err != nil {
 		t.Fatalf("idempotent grant: %v", err)
 	}
 	if !strings.Contains(strings.Join(adminFake.Lines, "\n"), "already has access") {
@@ -60,7 +60,7 @@ func TestGrantRevokeRoundtrip(t *testing.T) {
 	}
 
 	adminFake.Lines = nil
-	if err := runRevoke(context.Background(), adminApp, hostID, "aws/profile", ""); err != nil {
+	if err := runRevoke(context.Background(), adminApp, hostID, "aws/profile", "", false); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
 	joined := strings.Join(adminFake.Lines, "\n")
@@ -88,11 +88,11 @@ func TestGrantSingleKey(t *testing.T) {
 		t.Fatalf("add on v2: %v", err)
 	}
 
-	if err := runGrant(context.Background(), adminApp, hostID, "infra/k8s", "--missing--"); err == nil {
+	if err := runGrant(context.Background(), adminApp, hostID, "infra/k8s", "--missing--", false, true); err == nil {
 		t.Fatalf("grant of missing key should fail")
 	}
 
-	if err := runGrant(context.Background(), adminApp, hostID, "aws/profile", "amzn-wanfe"); err != nil {
+	if err := runGrant(context.Background(), adminApp, hostID, "aws/profile", "amzn-wanfe", false, true); err != nil {
 		t.Fatalf("grant single key: %v", err)
 	}
 	out := captureStdout(t, func() {
@@ -152,7 +152,7 @@ func TestAddV2CreatesIntermediateNodes(t *testing.T) {
 
 func TestGrantUnknownIdentityFails(t *testing.T) {
 	adminApp, _, _, _, _, _, _ := migratedStoreFixture(t)
-	err := runGrant(context.Background(), adminApp, "i_doesnotexist12345", "aws/profile", "")
+	err := runGrant(context.Background(), adminApp, "i_doesnotexist12345", "aws/profile", "", false, true)
 	if err == nil || !strings.Contains(err.Error(), "not enrolled") {
 		t.Fatalf("err = %v, want not-enrolled", err)
 	}
@@ -182,7 +182,7 @@ func TestNonFFRecomputeRetry(t *testing.T) {
 	}
 	defer func() { adminApp.Now = origNow }()
 
-	if err := runGrant(context.Background(), adminApp, hostID, "aws/profile", ""); err != nil {
+	if err := runGrant(context.Background(), adminApp, hostID, "aws/profile", "", false, true); err != nil {
 		t.Fatalf("grant with concurrent writer: %v", err)
 	}
 	if err := runVerify(context.Background(), adminApp, false); err != nil {

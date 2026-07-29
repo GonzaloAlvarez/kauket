@@ -13,21 +13,26 @@ import (
 
 func NewRevoke(a *app.App) *cobra.Command {
 	var key string
+	var asOwner bool
 	cmd := &cobra.Command{
 		Use:   "revoke <identity-id> <path>",
 		Short: "Revoke an identity's access to a namespace or single key",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRevoke(cmd.Context(), a, args[0], args[1], key)
+			return runRevoke(cmd.Context(), a, args[0], args[1], key, asOwner)
 		},
 	}
 	cmd.Flags().StringVar(&key, "key", "", "revoke a single key inside the namespace")
+	cmd.Flags().BoolVar(&asOwner, "owner", false, "revoke ownership of the namespace")
 	return cmd
 }
 
-func runRevoke(ctx context.Context, a *app.App, identityID, pathArg, key string) error {
+func runRevoke(ctx context.Context, a *app.App, identityID, pathArg, key string, asOwner bool) error {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if asOwner && key != "" {
+		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("kauket: --owner applies to namespaces, not single keys")}
 	}
 	home, err := requireRoleHome(a, config.RoleAdmin, "kauket revoke")
 	if err != nil {
@@ -38,13 +43,19 @@ func runRevoke(ctx context.Context, a *app.App, identityID, pathArg, key string)
 		return &ExitError{Code: ExitUsage, Err: err}
 	}
 	path := splitNodePath(pathArg)
-	plan, err := runV2Mutation(ctx, a, home, cfg, func(repoDir string) (manifest.Intent, error) {
+	post := func(repoDir, signKeyPath string, vctx *v2Context) error {
+		if !asOwner || len(path) != 0 {
+			return nil
+		}
+		return removeStoreAnchor(repoDir, signKeyPath, identityID)
+	}
+	plan, err := runV2MutationWithPost(ctx, a, home, cfg, func(repoDir string) (manifest.Intent, error) {
 		rec, err := loadRepoIdentity(repoDir, identityID)
 		if err != nil {
 			return manifest.Intent{}, &ExitError{Code: ExitUsage, Err: err}
 		}
-		return manifest.Intent{Op: manifest.OpRevoke, Path: path, Key: key, Identity: rec}, nil
-	})
+		return manifest.Intent{Op: manifest.OpRevoke, Path: path, Key: key, Identity: rec, AsOwner: asOwner}, nil
+	}, post)
 	if err != nil {
 		return err
 	}

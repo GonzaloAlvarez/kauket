@@ -165,7 +165,7 @@ func TestV2JoinUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load user config: %v", err)
 	}
-	err = runGrant(context.Background(), userApp, userCfg.V2.IdentityID, "cloud/vendor", "")
+	err = runGrant(context.Background(), userApp, userCfg.V2.IdentityID, "cloud/vendor", "", false, true)
 	var exitErr *ExitError
 	if !errors.As(err, &exitErr) {
 		t.Fatalf("user grant err = %v, want ExitError", err)

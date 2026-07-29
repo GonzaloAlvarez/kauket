@@ -192,9 +192,18 @@ func approveOneV2(ctx context.Context, a *app.App, engine *manifest.Engine, repo
 		if errors.Is(err, manifest.ErrNotFound) && len(segments) > 1 {
 			nodePath := segments[:len(segments)-1]
 			key := segments[len(segments)-1]
-			if _, entryErr := engine.Apply(manifest.Intent{Op: manifest.OpGrant, Path: nodePath, Key: key, Identity: rec}); entryErr == nil {
+			_, entryErr := engine.Apply(manifest.Intent{Op: manifest.OpGrant, Path: nodePath, Key: key, Identity: rec})
+			if entryErr == nil {
 				continue
 			}
+			if errors.Is(entryErr, manifest.ErrNotFound) {
+				a.UI.Println(fmt.Sprintf("warning: requested path %s does not exist; identity enrolled without that grant", p))
+				continue
+			}
+		}
+		if errors.Is(err, manifest.ErrNotFound) {
+			a.UI.Println(fmt.Sprintf("warning: requested path %s does not exist; identity enrolled without that grant", p))
+			continue
 		}
 		if errors.Is(err, manifest.ErrNotOwner) {
 			if routeErr := routeRequest(engine, repoDir, vctx, req, p, segments, now); routeErr != nil {

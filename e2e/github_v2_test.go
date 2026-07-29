@@ -364,3 +364,104 @@ func TestGitHubRequestJourney(t *testing.T) {
 		t.Fatalf("leak scan: %v", err)
 	}
 }
+
+func TestGitHubMultiOwnerJourney(t *testing.T) {
+	owner, cleanupRepo := githubJourneySetup(t)
+	skipSSH := os.Getenv("KAUKET_GITHUB_E2E_SKIP_SSH") == "1"
+	repo := fmt.Sprintf("kauket-e2e-%d", time.Now().UnixNano())
+	repoSlug := owner + "/" + repo
+	bin := buildBinary(t)
+	defer cleanupRepo(repoSlug)
+
+	root := mustResolvedTempRoot(t)
+	founderHome := filepath.Join(root, "founder-home")
+	founderKauket := filepath.Join(founderHome, ".config", "kauket")
+	userHome := filepath.Join(root, "user-home")
+	userKauket := filepath.Join(userHome, ".config", "kauket")
+	clientHome := filepath.Join(root, "client-home")
+	clientKauket := filepath.Join(clientHome, ".config", "kauket")
+	mustMkdir(t, founderHome, 0o700)
+	mustMkdir(t, userHome, 0o700)
+	mustMkdir(t, clientHome, 0o700)
+
+	res := runKauket(t, bin, founderKauket, founderHome, "init", "--v2", "--recovery-out", filepath.Join(root, "recovery"),
+		"--owner", owner, "--repo", repo, "--private", "--yes")
+	if res.err != nil {
+		t.Fatalf("init --v2: %v\nstderr:%s", res.err, res.stderr)
+	}
+	src := filepath.Join(founderHome, "src", "token")
+	mustMkdir(t, filepath.Dir(src), 0o700)
+	if err := os.WriteFile(src, []byte("MULTIOWNER TOKEN"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	res = runKauket(t, bin, founderKauket, founderHome, "add", "cloud.vendor.api_token", src, "--dest", "/etc/cloud/token")
+	if res.err != nil {
+		t.Fatalf("add: %v\nstderr:%s", res.err, res.stderr)
+	}
+
+	res = runKauket(t, bin, userKauket, userHome, "join", "--repo", repoSlug, "--request", "cloud/vendor", "--name", "co-owner", "--yes")
+	if res.err != nil {
+		t.Fatalf("join: %v\nstderr:%s", res.err, res.stderr)
+	}
+	res = runKauket(t, bin, founderKauket, founderHome, "approve", "--all", "--yes")
+	if res.err != nil {
+		t.Fatalf("approve join: %v\nstderr:%s", res.err, res.stderr)
+	}
+
+	userID := ""
+	userCfgBytes, err := os.ReadFile(filepath.Join(roleHomePath(userKauket, "admin"), "config.json"))
+	if err != nil {
+		t.Fatalf("read user config: %v", err)
+	}
+	for _, line := range strings.Split(string(userCfgBytes), "\n") {
+		if strings.Contains(line, `"identity_id"`) {
+			parts := strings.Split(line, `"`)
+			userID = parts[3]
+		}
+	}
+	if !strings.HasPrefix(userID, "i_") {
+		t.Fatalf("user identity id not found: %q", userID)
+	}
+
+	res = runKauket(t, bin, founderKauket, founderHome, "grant", userID, "cloud/vendor", "--owner", "--yes")
+	if res.err != nil {
+		t.Fatalf("grant --owner: %v\nstderr:%s", res.err, res.stderr)
+	}
+
+	res = runKauket(t, bin, clientKauket, clientHome, "enroll", "--repo", repoSlug, "--request", "cloud/vendor", "--name", randomEnrollName(), "--yes")
+	if res.err != nil {
+		t.Fatalf("enroll: %v\nstderr:%s", res.err, res.stderr)
+	}
+	res = runKauket(t, bin, founderKauket, founderHome, "approve", "--all", "--yes")
+	if res.err != nil {
+		t.Fatalf("approve enrollment: %v\nstderr:%s", res.err, res.stderr)
+	}
+	hostID := readHostID(t, clientKauket)
+
+	res = runKauket(t, bin, userKauket, userHome, "revoke", hostID, "cloud/vendor")
+	if res.err != nil {
+		t.Fatalf("second-owner revoke: %v\nstderr:%s", res.err, res.stderr)
+	}
+	if !strings.Contains(res.stdout, "revoked "+hostID) {
+		t.Fatalf("revoke output: %q", res.stdout)
+	}
+	res = runKauket(t, bin, userKauket, userHome, "grant", hostID, "cloud/vendor")
+	if res.err != nil {
+		t.Fatalf("second-owner grant: %v\nstderr:%s", res.err, res.stderr)
+	}
+
+	if !skipSSH {
+		res = runKauket(t, bin, clientKauket, clientHome, "get", "cloud.vendor.api_token", "--stdout")
+		if res.err != nil || res.stdout != "MULTIOWNER TOKEN" {
+			t.Fatalf("client get after user-signed grant: err=%v out=%q stderr=%s", res.err, res.stdout, res.stderr)
+		}
+	}
+
+	res = runKauket(t, bin, founderKauket, founderHome, "verify")
+	if res.err != nil {
+		t.Fatalf("verify: %v\nstderr:%s", res.err, res.stderr)
+	}
+	if err := runLeakScan(t, filepath.Join(roleHomePath(founderKauket, "admin"), "repo")); err != nil {
+		t.Fatalf("leak scan: %v", err)
+	}
+}

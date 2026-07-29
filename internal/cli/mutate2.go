@@ -50,6 +50,10 @@ func loadRepoIdentity(repoDir, id string) (manifest.IdentityRecord, error) {
 }
 
 func runV2Mutation(ctx context.Context, a *app.App, home string, cfg *config.Admin, buildIntent func(repoDir string) (manifest.Intent, error)) (*manifest.Plan, error) {
+	return runV2MutationWithPost(ctx, a, home, cfg, buildIntent, nil)
+}
+
+func runV2MutationWithPost(ctx context.Context, a *app.App, home string, cfg *config.Admin, buildIntent func(repoDir string) (manifest.Intent, error), postApply func(repoDir, signKeyPath string, vctx *v2Context) error) (*manifest.Plan, error) {
 	if cfg.V2 == nil || cfg.V2.SignKeyPath == "" {
 		return nil, &ExitError{Code: ExitUsage, Err: errors.New("kauket: this home has no v2 signing identity; run 'kauket migrate-store' or 'kauket init --v2' first")}
 	}
@@ -118,6 +122,11 @@ func runV2Mutation(ctx context.Context, a *app.App, home string, cfg *config.Adm
 		}
 		if plan.NoOp {
 			return plan, nil
+		}
+		if postApply != nil {
+			if err := postApply(repoDir, signKeyPath, vctx); err != nil {
+				return nil, err
+			}
 		}
 		author := gitstore.Author{Name: cfg.CommitAuthor.Name, Email: cfg.CommitAuthor.Email}
 		err = store.CommitAndPush(ctx, "kauket: update objects", author)
