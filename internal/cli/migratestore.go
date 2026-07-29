@@ -27,6 +27,7 @@ import (
 type migrateStoreFlags struct {
 	recoveryOut string
 	yes         bool
+	purgeV1     bool
 }
 
 func NewMigrateStore(a *app.App) *cobra.Command {
@@ -35,12 +36,90 @@ func NewMigrateStore(a *app.App) *cobra.Command {
 		Use:   "migrate-store",
 		Short: "Convert a v1 vault+bundle store to the v2 namespace store",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if f.purgeV1 {
+				return runPurgeV1(cmd.Context(), a, f)
+			}
 			return runMigrateStore(cmd.Context(), a, f)
 		},
 	}
 	cmd.Flags().StringVar(&f.recoveryOut, "recovery-out", "", "Directory to write the offline recovery key pair (required)")
 	cmd.Flags().BoolVar(&f.yes, "yes", false, "noninteractive")
+	cmd.Flags().BoolVar(&f.purgeV1, "purge-v1", false, "delete the frozen v1 vault and bundles from an already-migrated store")
 	return cmd
+}
+
+func runPurgeV1(ctx context.Context, a *app.App, f *migrateStoreFlags) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	home, err := requireRoleHome(a, config.RoleAdmin, "kauket migrate-store")
+	if err != nil {
+		return err
+	}
+	cfg, err := config.LoadAdmin(home)
+	if err != nil {
+		return &ExitError{Code: ExitUsage, Err: err}
+	}
+	if cfg.V2 == nil || cfg.V2.SignKeyPath == "" {
+		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: --purge-v1 requires a migrated v2 store")}
+	}
+	if !f.yes {
+		ok, err := a.UI.Confirm("permanently delete the frozen v1 vault and bundles? un-upgraded clients will stop working")
+		if err != nil {
+			return &ExitError{Code: ExitUsage, Err: err}
+		}
+		if !ok {
+			return nil
+		}
+	}
+	remoteURL := cfg.Repo.RemoteHTTPS
+	transport, err := buildAdminSyncTransport(ctx, a, remoteURL, cfg.Repo.Owner)
+	if err != nil {
+		return &ExitError{Code: ExitSync, Err: err}
+	}
+	newStore := a.NewStore
+	if newStore == nil {
+		newStore = gitstore.OpenOrClone
+	}
+	now := a.Now
+	if now == nil {
+		now = time.Now
+	}
+	store, err := newStore(ctx, gitstore.Config{RepoPath: config.RepoDir(home), URL: remoteURL, LockPath: config.LockPath(home), Now: now}, transport)
+	if err != nil {
+		return &ExitError{Code: ExitSync, Err: err}
+	}
+	defer store.Close()
+	if err := store.Sync(ctx); err != nil {
+		return &ExitError{Code: ExitSync, Err: err}
+	}
+	repoDir := config.RepoDir(home)
+	if !isV2Store(repoDir) {
+		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: not a v2 store")}
+	}
+
+	for _, p := range []string{filepath.Join(repoDir, "repo.json"), filepath.Join(repoDir, "admin"), filepath.Join(repoDir, "bundles")} {
+		if err := os.RemoveAll(p); err != nil {
+			return &ExitError{Code: ExitSync, Err: fmt.Errorf("kauket: remove %s: %w", p, err)}
+		}
+	}
+	signKeyPath := cfg.V2.SignKeyPath
+	if !filepath.IsAbs(signKeyPath) {
+		signKeyPath = filepath.Join(home, signKeyPath)
+	}
+	if err := rewriteStoreRoot(repoDir, signKeyPath, func(root *manifest.StoreRoot) error {
+		root.FrozenV1 = false
+		return nil
+	}); err != nil {
+		return &ExitError{Code: ExitSync, Err: err}
+	}
+
+	author := gitstore.Author{Name: cfg.CommitAuthor.Name, Email: cfg.CommitAuthor.Email}
+	if err := store.CommitAndPush(ctx, "kauket: purge v1 store", author); err != nil {
+		return &ExitError{Code: ExitSync, Err: fmt.Errorf("kauket: commit and push: %w", err)}
+	}
+	a.UI.Println("purged v1 vault and bundles; store is now v2-only")
+	return nil
 }
 
 type migNode struct {

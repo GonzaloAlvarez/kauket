@@ -61,6 +61,26 @@ kauket status                                 # shows both roles
 
 All paths stored in a role's config are relative, so a role home is relocatable as a unit.
 
+## Namespace stores (v2)
+
+v2 replaces the single admin vault and per-host bundles with a tree of namespace nodes, each with its own owners and readers. There is no admin role: whoever owns a node grants, revokes, and delegates access to it. Identities (people or machines) request access at any time; owners approve. Every node manifest is signed, so a repo writer cannot forge a grant, and clients verify the signature chain and content hashes before installing.
+
+```sh
+kauket init --v2 --recovery-out ~/kauket-recovery   # found a namespace store (move recovery keys offline)
+kauket add aws.profile.amzn-wanfe ...               # dotted ids are namespace paths
+kauket enroll --request aws/profile                 # a machine requests a namespace path
+kauket approve                                       # owner approves; grants the requested path
+kauket request infra/k8s                             # an enrolled identity asks for more, any time
+kauket grant  i_9d2e neptune/                        # owner grants proactively
+kauket grant  --owner i_77ab k8s/                    # delegate ownership of a subtree
+kauket revoke i_77ab k8s/                            # revoke (prints a rotation list)
+kauket rescue neptune/ --recovery-identity ... --recovery-sign-key ... --new-owner i_x
+kauket verify                                        # audit the chain and hashes
+kauket inspect --as i_9d2e                           # what can this identity read?
+```
+
+Migrate an existing v1 store in place with `kauket migrate-store --recovery-out <dir>`: dotted ids become the tree, per-host grants are materialized exactly, hosts keep their identities and deploy keys (no re-enrollment), and the v1 vault/bundles stay frozen for un-upgraded clients until `kauket migrate-store --purge-v1`. See [`specs/design-v2.0-namespace-acl.md`](specs/design-v2.0-namespace-acl.md) and ADRs 0004–0006.
+
 ## Install
 
 Via [amun](https://github.com/GonzaloAlvarez/amun) (recommended; verifies checksum, installs binary, creates `~/.config/kauket` with mode 0700):
