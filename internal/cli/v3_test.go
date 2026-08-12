@@ -25,7 +25,7 @@ func clientHostID(t *testing.T, clientBase string) string {
 }
 
 func TestGrantRevokeRoundtrip(t *testing.T) {
-	adminApp, adminFake, _, clientApp, _, clientBase, _ := migratedStoreFixture(t)
+	adminApp, adminFake, _, clientApp, _, clientBase, _ := v2StoreFixture(t)
 	hostID := clientHostID(t, clientBase)
 
 	err := runGet(context.Background(), clientApp, &getFlags{stdout: true, noSync: true}, "aws.profile.amzn-wanfe")
@@ -80,7 +80,7 @@ func TestGrantRevokeRoundtrip(t *testing.T) {
 }
 
 func TestGrantSingleKey(t *testing.T) {
-	adminApp, _, _, clientApp, clientFake, clientBase, keyContent := migratedStoreFixture(t)
+	adminApp, _, _, clientApp, clientFake, clientBase, keyContent := v2StoreFixture(t)
 	hostID := clientHostID(t, clientBase)
 
 	keyPath := writeSSHKeyFixture(t)
@@ -112,7 +112,7 @@ func TestGrantSingleKey(t *testing.T) {
 }
 
 func TestAddV2CreatesIntermediateNodes(t *testing.T) {
-	adminApp, adminFake, adminBase, _, _, _, _ := migratedStoreFixture(t)
+	adminApp, adminFake, adminBase, _, _, _, _ := v2StoreFixture(t)
 
 	src := filepath.Join(t.TempDir(), "token")
 	if err := os.WriteFile(src, []byte("DEEP TOKEN VALUE"), 0o600); err != nil {
@@ -151,7 +151,7 @@ func TestAddV2CreatesIntermediateNodes(t *testing.T) {
 }
 
 func TestGrantUnknownIdentityFails(t *testing.T) {
-	adminApp, _, _, _, _, _, _ := migratedStoreFixture(t)
+	adminApp, _, _, _, _, _, _ := v2StoreFixture(t)
 	err := runGrant(context.Background(), adminApp, "i_doesnotexist12345", "aws/profile", "", false, true)
 	if err == nil || !strings.Contains(err.Error(), "not enrolled") {
 		t.Fatalf("err = %v, want not-enrolled", err)
@@ -159,7 +159,7 @@ func TestGrantUnknownIdentityFails(t *testing.T) {
 }
 
 func TestNonFFRecomputeRetry(t *testing.T) {
-	adminApp, _, adminBase, _, _, clientBase, _ := migratedStoreFixture(t)
+	adminApp, _, adminBase, _, _, clientBase, _ := v2StoreFixture(t)
 	hostID := clientHostID(t, clientBase)
 	adminHome := config.RoleHome(adminBase, config.RoleAdmin)
 	adminCfg, err := config.LoadAdmin(adminHome)

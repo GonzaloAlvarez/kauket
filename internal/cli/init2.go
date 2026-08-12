@@ -20,7 +20,7 @@ import (
 
 func runInitV2(ctx context.Context, a *app.App, f *initFlags) error {
 	if f.recoveryOut == "" {
-		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: --v2 requires --recovery-out <dir> for the offline recovery key pair")}
+		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: init requires --recovery-out <dir> for the offline recovery key pair")}
 	}
 	home, _, err := resolveRoleHome(a, config.RoleAdmin)
 	if err != nil {

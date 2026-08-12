@@ -19,10 +19,10 @@ func v2StoreWithRecoveryDir(t *testing.T) (*testAppBundle, string, string) {
 	recoveryOut := filepath.Join(t.TempDir(), "recovery")
 	flags := &initFlags{
 		owner: "GonzaloAlvarez", repo: "kauket-store", private: true,
-		remote: bareRepo(t), noGitHub: true, yes: true, v2: true, recoveryOut: recoveryOut,
+		remote: bareRepo(t), noGitHub: true, yes: true, recoveryOut: recoveryOut,
 	}
 	if err := runInit(context.Background(), a, flags); err != nil {
-		t.Fatalf("init --v2: %v", err)
+		t.Fatalf("init: %v", err)
 	}
 	fx := &testAppBundle{app: a, fake: fake, home: home}
 	src := filepath.Join(t.TempDir(), "token")

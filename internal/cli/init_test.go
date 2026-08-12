@@ -43,43 +43,46 @@ func newTestApp(t *testing.T) (*app.App, *ui.Fake, string) {
 func TestInitFreshLocalRemoteWritesExpectedFiles(t *testing.T) {
 	a, fake, home := newTestApp(t)
 	remoteURL := bareRepo(t)
+	recoveryOut := filepath.Join(t.TempDir(), "recovery")
 
 	flags := &initFlags{
-		owner:    "GonzaloAlvarez",
-		repo:     "kauket-store",
-		private:  true,
-		remote:   remoteURL,
-		noGitHub: true,
-		yes:      true,
+		owner:       "GonzaloAlvarez",
+		repo:        "kauket-store",
+		private:     true,
+		remote:      remoteURL,
+		noGitHub:    true,
+		yes:         true,
+		recoveryOut: recoveryOut,
 	}
 	if err := runInit(context.Background(), a, flags); err != nil {
 		t.Fatalf("runInit: %v", err)
 	}
 
-	if len(fake.Lines) != 2 {
-		t.Fatalf("expected 2 output lines, got %d: %v", len(fake.Lines), fake.Lines)
+	if len(fake.Lines) != 4 {
+		t.Fatalf("expected 4 output lines, got %d: %v", len(fake.Lines), fake.Lines)
 	}
-	if !strings.HasPrefix(fake.Lines[0], "initialized kauket store ") {
-		t.Fatalf("first line %q does not start with initialized kauket store", fake.Lines[0])
+	if fake.Lines[0] != "initialized kauket v2 store GonzaloAlvarez/kauket-store" {
+		t.Fatalf("first line: %q", fake.Lines[0])
 	}
-	if !strings.Contains(fake.Lines[0], "GonzaloAlvarez/kauket-store") {
-		t.Fatalf("first line missing owner/repo: %q", fake.Lines[0])
+	if !strings.HasPrefix(fake.Lines[1], "founder identity i_") || !strings.HasSuffix(fake.Lines[1], " created") {
+		t.Fatalf("second line: %q", fake.Lines[1])
 	}
-	if !strings.HasPrefix(fake.Lines[1], "admin recipient ar_") {
-		t.Fatalf("second line %q does not start with admin recipient ar_", fake.Lines[1])
+	if fake.Lines[2] != "recovery key pair written to "+recoveryOut {
+		t.Fatalf("third line: %q", fake.Lines[2])
 	}
-	if !strings.HasSuffix(fake.Lines[1], " created") {
-		t.Fatalf("second line %q does not end with created", fake.Lines[1])
+	if !strings.Contains(fake.Lines[3], "OFFLINE") {
+		t.Fatalf("fourth line: %q", fake.Lines[3])
 	}
 
 	adminHome := config.RoleHome(home, config.RoleAdmin)
 	wantFiles := []string{
 		filepath.Join(adminHome, "config.json"),
 		filepath.Join(adminHome, "identities", "admin.txt"),
-		filepath.Join(adminHome, "repo", "repo.json"),
-		filepath.Join(adminHome, "repo", "admin", "vault.age"),
-		filepath.Join(adminHome, "repo", "bundles", ".keep"),
-		filepath.Join(adminHome, "repo", "requests", ".keep"),
+		filepath.Join(adminHome, "identities", "sign.key"),
+		filepath.Join(adminHome, "repo", "store.json"),
+		filepath.Join(adminHome, "repo", "store.json.sig"),
+		filepath.Join(recoveryOut, "recovery-age.txt"),
+		filepath.Join(recoveryOut, "recovery-sign.key"),
 	}
 	for _, p := range wantFiles {
 		if _, err := os.Stat(p); err != nil {
@@ -90,7 +93,9 @@ func TestInitFreshLocalRemoteWritesExpectedFiles(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		assertMode(t, filepath.Join(adminHome, "config.json"), 0o600)
 		assertMode(t, filepath.Join(adminHome, "identities", "admin.txt"), 0o600)
+		assertMode(t, filepath.Join(adminHome, "identities", "sign.key"), 0o600)
 		assertMode(t, filepath.Join(adminHome, "identities"), 0o700)
+		assertMode(t, filepath.Join(recoveryOut, "recovery-age.txt"), 0o600)
 	}
 
 	role, err := config.PeekRole(adminHome)
@@ -107,25 +112,26 @@ func TestInitFreshLocalRemoteWritesExpectedFiles(t *testing.T) {
 	if cfg.StoreID == "" {
 		t.Fatalf("store id empty")
 	}
-	if cfg.Admin.RecipientID == "" {
-		t.Fatalf("admin recipient id empty")
-	}
 	if cfg.Admin.IdentityPath != filepath.Join("identities", "admin.txt") {
 		t.Fatalf("identity path unexpected: %q", cfg.Admin.IdentityPath)
 	}
+	if cfg.V2 == nil || !strings.HasPrefix(cfg.V2.IdentityID, "i_") || cfg.V2.SignKeyPath != filepath.Join("identities", "sign.key") {
+		t.Fatalf("v2 config: %+v", cfg.V2)
+	}
 }
 
-func TestInitReattachIsIdempotent(t *testing.T) {
+func TestInitRefusesExistingV2Store(t *testing.T) {
 	a, fake, home := newTestApp(t)
 	remoteURL := bareRepo(t)
 
 	flags := &initFlags{
-		owner:    "GonzaloAlvarez",
-		repo:     "kauket-store",
-		private:  true,
-		remote:   remoteURL,
-		noGitHub: true,
-		yes:      true,
+		owner:       "GonzaloAlvarez",
+		repo:        "kauket-store",
+		private:     true,
+		remote:      remoteURL,
+		noGitHub:    true,
+		yes:         true,
+		recoveryOut: filepath.Join(t.TempDir(), "recovery"),
 	}
 	if err := runInit(context.Background(), a, flags); err != nil {
 		t.Fatalf("first init: %v", err)
@@ -137,74 +143,33 @@ func TestInitReattachIsIdempotent(t *testing.T) {
 	}
 	fake.Lines = nil
 
-	if err := runInit(context.Background(), a, flags); err != nil {
-		t.Fatalf("second init: %v", err)
+	err = runInit(context.Background(), a, flags)
+	if err == nil || !strings.Contains(err.Error(), "already holds a v2 store") {
+		t.Fatalf("second init err = %v, want already-holds-v2 refusal", err)
 	}
+
 	cfg2, err := config.LoadAdmin(adminHome)
 	if err != nil {
 		t.Fatalf("load second: %v", err)
 	}
 	if cfg1.StoreID != cfg2.StoreID {
-		t.Fatalf("store id changed between inits: %q -> %q", cfg1.StoreID, cfg2.StoreID)
+		t.Fatalf("store id changed after refused re-init: %q -> %q", cfg1.StoreID, cfg2.StoreID)
 	}
-	if cfg1.Admin.RecipientID != cfg2.Admin.RecipientID {
-		t.Fatalf("recipient id changed between inits: %q -> %q", cfg1.Admin.RecipientID, cfg2.Admin.RecipientID)
-	}
-	if len(fake.Lines) != 2 {
-		t.Fatalf("expected 2 reattach lines, got %v", fake.Lines)
-	}
-	if !strings.Contains(fake.Lines[0], "initialized kauket store") {
-		t.Fatalf("reattach first line unexpected: %q", fake.Lines[0])
-	}
-}
-
-func TestInitOnLegacyClientCreatesAdminAlongside(t *testing.T) {
-	a, _, home := newTestApp(t)
-	clientCfg := &config.Client{
-		Schema:  config.ConfigSchema,
-		Role:    config.RoleClient,
-		StoreID: "ks_test",
-		Host: config.HostInfo{
-			ID:           "h_test1234567890",
-			IdentityPath: "identities/host.txt",
-		},
-		Repo: config.DefaultRepoInfo("GonzaloAlvarez", "kauket-store"),
-	}
-	if err := config.SaveClient(home, clientCfg); err != nil {
-		t.Fatalf("save client: %v", err)
-	}
-	flags := &initFlags{
-		owner:    "GonzaloAlvarez",
-		repo:     "kauket-store",
-		private:  true,
-		remote:   bareRepo(t),
-		noGitHub: true,
-		yes:      true,
-	}
-	if err := runInit(context.Background(), a, flags); err != nil {
-		t.Fatalf("init alongside legacy client: %v", err)
-	}
-	if _, err := config.LoadAdmin(config.RoleHome(home, config.RoleAdmin)); err != nil {
-		t.Fatalf("load admin from role home: %v", err)
-	}
-	got, err := config.LoadClient(home)
-	if err != nil {
-		t.Fatalf("legacy client config should be untouched: %v", err)
-	}
-	if got.Host.ID != clientCfg.Host.ID {
-		t.Fatalf("legacy client host changed: %q", got.Host.ID)
+	if cfg1.V2.IdentityID != cfg2.V2.IdentityID {
+		t.Fatalf("identity id changed after refused re-init: %q -> %q", cfg1.V2.IdentityID, cfg2.V2.IdentityID)
 	}
 }
 
 func TestInitRefusesSSHRemoteWithoutNoGitHub(t *testing.T) {
 	a, _, _ := newTestApp(t)
 	flags := &initFlags{
-		owner:    "GonzaloAlvarez",
-		repo:     "kauket-store",
-		private:  true,
-		remote:   "git@github.com:GonzaloAlvarez/kauket-store.git",
-		noGitHub: false,
-		yes:      true,
+		owner:       "GonzaloAlvarez",
+		repo:        "kauket-store",
+		private:     true,
+		remote:      "git@github.com:GonzaloAlvarez/kauket-store.git",
+		noGitHub:    false,
+		yes:         true,
+		recoveryOut: filepath.Join(t.TempDir(), "recovery"),
 	}
 	err := runInit(context.Background(), a, flags)
 	if err == nil {
@@ -215,30 +180,25 @@ func TestInitRefusesSSHRemoteWithoutNoGitHub(t *testing.T) {
 	}
 }
 
-func TestInitAdminVaultIsEncryptedToRecipient(t *testing.T) {
-	a, _, home := newTestApp(t)
-	remoteURL := bareRepo(t)
-	flags := &initFlags{
-		owner:    "GonzaloAlvarez",
-		repo:     "kauket-store",
-		private:  true,
-		remote:   remoteURL,
-		noGitHub: true,
-		yes:      true,
+func TestInitV2ObjectsAreEncrypted(t *testing.T) {
+	fx, _ := initV2Fixture(t)
+	adminHome := config.RoleHome(fx.home, config.RoleAdmin)
+	dir := objectsDir(config.RepoDir(adminHome))
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("objects dir: %v entries, err %v", len(entries), err)
 	}
-	if err := runInit(context.Background(), a, flags); err != nil {
-		t.Fatalf("init: %v", err)
-	}
-	vaultPath := filepath.Join(config.RoleHome(home, config.RoleAdmin), "repo", "admin", "vault.age")
-	ct, err := os.ReadFile(vaultPath)
-	if err != nil {
-		t.Fatalf("read vault: %v", err)
-	}
-	if len(ct) == 0 {
-		t.Fatalf("vault file empty")
-	}
-	if !strings.Contains(string(ct), "age-encryption") {
-		t.Fatalf("vault does not contain age header marker; first 64 bytes: %q", limitString(string(ct), 64))
+	for _, e := range entries {
+		ct, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatalf("read object %s: %v", e.Name(), err)
+		}
+		if len(ct) == 0 {
+			t.Fatalf("object %s empty", e.Name())
+		}
+		if !strings.Contains(string(ct), "age-encryption") {
+			t.Fatalf("object %s lacks age header marker; first 64 bytes: %q", e.Name(), limitString(string(ct), 64))
+		}
 	}
 }
 

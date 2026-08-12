@@ -69,7 +69,10 @@ func statusV2(a *app.App, home string, role config.Role, identityPath string, v2
 	}
 	entries, nodeCount, err := readableEntryPaths(vctx)
 	if err != nil {
-		return translateV2ReadError(err)
+		if !isNoIdentityMatch(err) {
+			return translateV2ReadError(err)
+		}
+		entries, nodeCount = nil, 0
 	}
 	if err := vctx.savePins(); err != nil {
 		return &ExitError{Code: ExitUsage, Err: err}

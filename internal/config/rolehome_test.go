@@ -38,15 +38,12 @@ func TestResolveRoleHome_LegacyRoot(t *testing.T) {
 	if err := SaveClient(base, clientFixture()); err != nil {
 		t.Fatalf("SaveClient: %v", err)
 	}
-	home, exists, err := ResolveRoleHome(base, RoleClient)
-	if err != nil {
-		t.Fatalf("ResolveRoleHome: %v", err)
+	_, _, err := ResolveRoleHome(base, RoleClient)
+	if err == nil {
+		t.Fatalf("ResolveRoleHome: want legacy-layout error, got nil")
 	}
-	if !exists {
-		t.Fatalf("exists = false, want true")
-	}
-	if home != base {
-		t.Fatalf("home = %q, want legacy root %q", home, base)
+	if !strings.Contains(err.Error(), "legacy root-layout home") {
+		t.Fatalf("ResolveRoleHome error = %q, want legacy root-layout hint", err)
 	}
 }
 
@@ -151,12 +148,8 @@ func TestInstalledRoles_LegacyMixed(t *testing.T) {
 	if err := SaveClient(RoleHome(base, RoleClient), clientFixture()); err != nil {
 		t.Fatalf("SaveClient: %v", err)
 	}
-	roles, err := InstalledRoles(base)
-	if err != nil {
-		t.Fatalf("InstalledRoles: %v", err)
-	}
-	if len(roles) != 2 || roles[0] != RoleAdmin || roles[1] != RoleClient {
-		t.Fatalf("roles = %v, want [admin client]", roles)
+	if _, err := InstalledRoles(base); err == nil {
+		t.Fatalf("InstalledRoles: want legacy-layout error, got nil")
 	}
 }
 

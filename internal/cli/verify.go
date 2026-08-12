@@ -74,7 +74,7 @@ func runVerify(ctx context.Context, a *app.App, noSync bool) error {
 		}
 	}
 	if !isV2Store(config.RepoDir(home)) {
-		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: verify requires a v2 store; run 'kauket migrate-store' first")}
+		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: verify requires a v2 store; migrate legacy v1 stores with the kauket v2.0.x release ('kauket migrate-store')")}
 	}
 
 	vctx, err := loadV2Context(home, identityPath, v2)

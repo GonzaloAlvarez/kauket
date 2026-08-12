@@ -17,7 +17,7 @@ git init --bare -b main "$REMOTE" >/dev/null
 go build -o "$ROOT/kauket" ./cmd/kauket
 
 echo "=== init admin ==="
-KAUKET_HOME="$ADMIN_HOME/.config/kauket" HOME="$ADMIN_HOME" "$ROOT/kauket" init --remote "file://$REMOTE" --no-github --yes
+KAUKET_HOME="$ADMIN_HOME/.config/kauket" HOME="$ADMIN_HOME" "$ROOT/kauket" init --remote "file://$REMOTE" --no-github --recovery-out "$ROOT/recovery" --yes
 
 echo "=== generate + add ssh key ==="
 mkdir -p "$ADMIN_HOME/.ssh"

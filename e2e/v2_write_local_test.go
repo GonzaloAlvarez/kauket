@@ -24,18 +24,18 @@ func TestV2WriteLocalE2E(t *testing.T) {
 	mustMkdir(t, clientHome, 0o700)
 	remoteURL := setupBareRemote(t, bareDir)
 
-	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--yes")
+	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
 	if res.err != nil {
 		t.Fatalf("init: %v\nstderr:%s", res.err, res.stderr)
 	}
 	srcKey := filepath.Join(adminHome, "src", "main_key")
 	mustMkdir(t, filepath.Dir(srcKey), 0o700)
-	if err := os.WriteFile(srcKey, []byte("V1 SSH KEY"), 0o600); err != nil {
+	if err := os.WriteFile(srcKey, []byte("SSH KEY"), 0o600); err != nil {
 		t.Fatalf("write src: %v", err)
 	}
 	res = runKauket(t, bin, adminKauket, adminHome, "add", "ssh.main_private_key", srcKey)
 	if res.err != nil {
-		t.Fatalf("v1 add: %v\nstderr:%s", res.err, res.stderr)
+		t.Fatalf("ssh add: %v\nstderr:%s", res.err, res.stderr)
 	}
 	res = runKauket(t, bin, clientKauket, clientHome, "enroll", "--remote", remoteURL, "--request", "ssh", "--name", "writer-client", "--yes")
 	if res.err != nil {
@@ -44,10 +44,6 @@ func TestV2WriteLocalE2E(t *testing.T) {
 	res = runKauket(t, bin, adminKauket, adminHome, "approve", "--all", "--yes")
 	if res.err != nil {
 		t.Fatalf("approve: %v\nstderr:%s", res.err, res.stderr)
-	}
-	res = runKauket(t, bin, adminKauket, adminHome, "migrate-store", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
-	if res.err != nil {
-		t.Fatalf("migrate-store: %v\nstderr:%s", res.err, res.stderr)
 	}
 
 	hostID := readHostID(t, clientKauket)
@@ -99,7 +95,7 @@ func TestV2WriteLocalE2E(t *testing.T) {
 	}
 
 	res = runKauket(t, bin, clientKauket, clientHome, "get", "ssh.main_private_key", "--stdout")
-	if res.err != nil || res.stdout != "V1 SSH KEY" {
+	if res.err != nil || res.stdout != "SSH KEY" {
 		t.Fatalf("unrelated grant disturbed: err=%v out=%q", res.err, res.stdout)
 	}
 

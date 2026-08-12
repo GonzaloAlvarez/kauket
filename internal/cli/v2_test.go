@@ -24,11 +24,10 @@ func initV2Fixture(t *testing.T) (*testAppBundle, string) {
 		remote:      bareRepo(t),
 		noGitHub:    true,
 		yes:         true,
-		v2:          true,
 		recoveryOut: recoveryOut,
 	}
 	if err := runInit(context.Background(), a, flags); err != nil {
-		t.Fatalf("runInit --v2: %v", err)
+		t.Fatalf("runInit: %v", err)
 	}
 	return &testAppBundle{app: a, fake: fake, home: home}, recoveryOut
 }
@@ -100,21 +99,25 @@ func TestInitV2CreatesReadableStore(t *testing.T) {
 
 func TestInitV2RequiresRecoveryOut(t *testing.T) {
 	a, _, _ := newTestApp(t)
-	flags := &initFlags{owner: "o", repo: "r", remote: bareRepo(t), noGitHub: true, yes: true, v2: true}
+	flags := &initFlags{owner: "o", repo: "r", remote: bareRepo(t), noGitHub: true, yes: true}
 	err := runInit(context.Background(), a, flags)
 	if err == nil || !strings.Contains(err.Error(), "--recovery-out") {
 		t.Fatalf("err = %v", err)
 	}
 }
 
-func migratedStoreFixture(t *testing.T) (adminApp *app.App, adminFake *ui.Fake, adminBase string, clientApp *app.App, clientFake *ui.Fake, clientBase string, keyContent []byte) {
+func v2StoreFixture(t *testing.T) (adminApp *app.App, adminFake *ui.Fake, adminBase string, clientApp *app.App, clientFake *ui.Fake, clientBase string, keyContent []byte) {
 	t.Helper()
-	base, _, bareURL := setupAdminStore(t)
-	aFake := &ui.Fake{}
-	aApp := &app.App{UI: aFake, Home: base}
+	fx, _ := initV2Fixture(t)
+	aApp, aFake, base := fx.app, fx.fake, fx.home
+	adminHome := config.RoleHome(base, config.RoleAdmin)
+	cfg, err := config.LoadAdmin(adminHome)
+	if err != nil {
+		t.Fatalf("load admin: %v", err)
+	}
+	bareURL := cfg.Repo.RemoteHTTPS
 
 	keyPath := writeSSHKeyFixture(t)
-	var err error
 	keyContent, err = os.ReadFile(keyPath)
 	if err != nil {
 		t.Fatalf("read key fixture: %v", err)
@@ -136,42 +139,21 @@ func migratedStoreFixture(t *testing.T) (adminApp *app.App, adminFake *ui.Fake, 
 	if err := runApprove(context.Background(), aApp, &approveFlags{all: true, yes: true}); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
-
-	recoveryOut := filepath.Join(t.TempDir(), "recovery")
+	if err := runSync(context.Background(), cApp, ""); err != nil {
+		t.Fatalf("client sync: %v", err)
+	}
 	aFake.Lines = nil
-	if err := runMigrateStore(context.Background(), aApp, &migrateStoreFlags{recoveryOut: recoveryOut, yes: true}); err != nil {
-		t.Fatalf("migrate-store: %v", err)
-	}
-	joined := strings.Join(aFake.Lines, "\n")
-	if !strings.Contains(joined, "migrated store") || !strings.Contains(joined, "schema 2") {
-		t.Fatalf("migrate output: %v", aFake.Lines)
-	}
+	cFake.Lines = nil
 	return aApp, aFake, base, cApp, cFake, cBase, keyContent
 }
 
-func TestMigrateStoreEndToEnd(t *testing.T) {
-	adminApp, adminFake, adminBase, clientApp, clientFake, _, keyContent := migratedStoreFixture(t)
+func TestV2StoreEndToEnd(t *testing.T) {
+	adminApp, adminFake, adminBase, clientApp, clientFake, _, keyContent := v2StoreFixture(t)
 	adminHome := config.RoleHome(adminBase, config.RoleAdmin)
 	repoDir := config.RepoDir(adminHome)
 
 	if !isV2Store(repoDir) {
-		t.Fatalf("store not v2 after migration")
-	}
-	for _, p := range []string{
-		filepath.Join(repoDir, "repo.json"),
-		filepath.Join(repoDir, "admin", "vault.age"),
-	} {
-		if _, err := os.Stat(p); err != nil {
-			t.Fatalf("frozen v1 file missing: %v", err)
-		}
-	}
-
-	adminFake.Lines = nil
-	if err := runMigrateStore(context.Background(), adminApp, &migrateStoreFlags{recoveryOut: t.TempDir(), yes: true}); err != nil {
-		t.Fatalf("second migrate: %v", err)
-	}
-	if len(adminFake.Lines) != 1 || adminFake.Lines[0] != "already migrated" {
-		t.Fatalf("second migrate output: %v", adminFake.Lines)
+		t.Fatalf("store not v2")
 	}
 
 	out := captureStdout(t, func() {
@@ -222,7 +204,7 @@ func TestMigrateStoreEndToEnd(t *testing.T) {
 }
 
 func TestVerifyDetectsTamperedObject(t *testing.T) {
-	adminApp, _, adminBase, _, _, _, _ := migratedStoreFixture(t)
+	adminApp, _, adminBase, _, _, _, _ := v2StoreFixture(t)
 	adminHome := config.RoleHome(adminBase, config.RoleAdmin)
 	dir := objectsDir(config.RepoDir(adminHome))
 	entries, err := os.ReadDir(dir)

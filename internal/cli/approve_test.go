@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -23,11 +22,12 @@ import (
 	"github.com/gonzaloalvarez/kauket/internal/app"
 	"github.com/gonzaloalvarez/kauket/internal/bundle"
 	"github.com/gonzaloalvarez/kauket/internal/config"
+	"github.com/gonzaloalvarez/kauket/internal/manifest"
 	"github.com/gonzaloalvarez/kauket/internal/model"
 	"github.com/gonzaloalvarez/kauket/internal/ui"
 )
 
-func enrollClientHome(t *testing.T, bareURL, name string) (clientHome string, requestID string) {
+func enrollClientHome(t *testing.T, bareURL, name string) (clientBase string, clientHome string, requestID string) {
 	t.Helper()
 	a, fake, home := newTestApp(t)
 	flags := &enrollFlags{
@@ -49,7 +49,7 @@ func enrollClientHome(t *testing.T, bareURL, name string) (clientHome string, re
 	if requestID == "" {
 		t.Fatalf("could not find request id in enroll output: %v", fake.Lines)
 	}
-	return config.RoleHome(home, config.RoleClient), requestID
+	return home, config.RoleHome(home, config.RoleClient), requestID
 }
 
 func newApproveAdminApp(t *testing.T, home string) (*app.App, *ui.Fake) {
@@ -62,11 +62,50 @@ func newApproveAdminApp(t *testing.T, home string) (*app.App, *ui.Fake) {
 	return a, f
 }
 
+func storeAnchorRecipients(t *testing.T, adminHome string) []string {
+	t.Helper()
+	data, err := os.ReadFile(storeRootPath(config.RepoDir(adminHome)))
+	if err != nil {
+		t.Fatalf("read store.json: %v", err)
+	}
+	var root manifest.StoreRoot
+	if err := json.Unmarshal(data, &root); err != nil {
+		t.Fatalf("parse store.json: %v", err)
+	}
+	recips := make([]string, 0, len(root.TrustAnchors))
+	for _, a := range root.TrustAnchors {
+		recips = append(recips, a.AgeRecipient)
+	}
+	if len(recips) == 0 {
+		t.Fatalf("store.json has no trust anchors")
+	}
+	return recips
+}
+
+func repoIdentityCount(t *testing.T, adminHome string) int {
+	t.Helper()
+	entries, err := os.ReadDir(repoIdentitiesDir(config.RepoDir(adminHome)))
+	if err != nil {
+		t.Fatalf("read identities dir: %v", err)
+	}
+	return len(entries)
+}
+
 func TestApproveSingleRequest(t *testing.T) {
 	adminBase, adminHome, bareURL := setupAdminStore(t)
-	clientHome, _ := enrollClientHome(t, bareURL, "machine2")
-
 	adminApp, fake := newApproveAdminApp(t, adminBase)
+	keyPath := writeSSHKeyFixture(t)
+	if err := runAdd(context.Background(), adminApp, &addFlags{}, "ssh.main_private_key", keyPath); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	want, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	clientBase, clientHome, _ := enrollClientHome(t, bareURL, "machine2")
+
+	fake.Lines = nil
 	flags := &approveFlags{all: true, yes: true}
 	if err := runApprove(context.Background(), adminApp, flags); err != nil {
 		t.Fatalf("approve: %v", err)
@@ -96,47 +135,40 @@ func TestApproveSingleRequest(t *testing.T) {
 		}
 	}
 	listing := fake.Lines[len(wantPrefix)]
-	if !strings.HasPrefix(listing, "1. request machine2 ") {
-		t.Fatalf("listing line should start with '1. request machine2 ', got %q", listing)
+	if !strings.HasPrefix(listing, "1. request machine2 (machine) ") {
+		t.Fatalf("listing line should start with '1. request machine2 (machine) ', got %q", listing)
 	}
 	if !strings.HasSuffix(listing, " ssh") {
 		t.Fatalf("listing line should end with ' ssh', got %q", listing)
 	}
 
-	vault := loadAdminVault(t, adminHome)
 	clientCfg, err := config.LoadClient(clientHome)
 	if err != nil {
 		t.Fatalf("load client: %v", err)
 	}
-	host, ok := vault.Hosts[clientCfg.Host.ID]
-	if !ok {
-		t.Fatalf("vault missing host %s; hosts: %v", clientCfg.Host.ID, vault.Hosts)
+	rec, err := loadRepoIdentity(config.RepoDir(adminHome), clientCfg.Host.ID)
+	if err != nil {
+		t.Fatalf("identity record missing for %s: %v", clientCfg.Host.ID, err)
 	}
-	if host.DisplayName != "machine2" {
-		t.Fatalf("host display name: %q", host.DisplayName)
+	hostRecipient, err := recipientOfIdentityFile(filepath.Join(clientHome, "identities", "host.txt"))
+	if err != nil {
+		t.Fatalf("host recipient: %v", err)
 	}
-	if len(host.GrantedProfiles) != 1 || host.GrantedProfiles[0] != "ssh" {
-		t.Fatalf("granted profiles: %v", host.GrantedProfiles)
+	if rec.AgeRecipient != hostRecipient {
+		t.Fatalf("identity record recipient %q != host recipient %q", rec.AgeRecipient, hostRecipient)
 	}
-	if host.AgeRecipient == "" {
-		t.Fatalf("host age recipient empty")
-	}
-	if host.DeployKeyFingerprint == "" || !strings.HasPrefix(host.DeployKeyFingerprint, "SHA256:") {
-		t.Fatalf("deploy key fingerprint: %q", host.DeployKeyFingerprint)
+	if !strings.HasPrefix(rec.SSHEd25519Pubkey, "ssh-ed25519 ") {
+		t.Fatalf("identity record sign key: %q", rec.SSHEd25519Pubkey)
 	}
 
-	bundlePath := filepath.Join(config.RepoDir(adminHome), "bundles", clientCfg.Host.ID+".age")
-	ct, err := os.ReadFile(bundlePath)
-	if err != nil {
-		t.Fatalf("read bundle: %v", err)
-	}
-	hostIDPath := filepath.Join(clientHome, "identities", "host.txt")
-	if _, err := bundle.DecodeHostBundle(ct, agebox.FileIdentityProvider{Path: hostIDPath}); err != nil {
-		t.Fatalf("host identity should decrypt bundle: %v", err)
-	}
-	adminIDPath := config.AdminIdentityPath(adminHome)
-	if _, err := bundle.DecodeHostBundle(ct, agebox.FileIdentityProvider{Path: adminIDPath}); err != nil {
-		t.Fatalf("admin identity should also decrypt bundle (admin-recovery invariant): %v", err)
+	clientApp := &app.App{UI: &ui.Fake{}, Home: clientBase}
+	out := captureStdout(t, func() {
+		if err := runGet(context.Background(), clientApp, &getFlags{stdout: true}, "ssh.main_private_key"); err != nil {
+			t.Fatalf("client get after approve: %v", err)
+		}
+	})
+	if string(out) != string(want) {
+		t.Fatalf("client content mismatch after approve")
 	}
 
 	if refs := collectEnrollRequestRefs(t, bareURL); len(refs) != 0 {
@@ -148,6 +180,9 @@ func TestApproveSingleRequest(t *testing.T) {
 	leakErrs := scanForLiteral(t, checkoutRepo, osHostname)
 	if osHostname != "" && len(leakErrs) > 0 {
 		t.Fatalf("os.Hostname literal leak in admin checkout: %v", leakErrs)
+	}
+	if leaks := scanForLiteral(t, checkoutRepo, "machine2"); len(leaks) > 0 {
+		t.Fatalf("display name leak in admin checkout: %v", leaks)
 	}
 }
 
@@ -185,19 +220,12 @@ func scanForLiteral(t *testing.T, root, needle string) []string {
 
 func TestApproveDryRun(t *testing.T) {
 	adminBase, adminHome, bareURL := setupAdminStore(t)
-	clientHome, _ := enrollClientHome(t, bareURL, "machine2")
+	enrollClientHome(t, bareURL, "machine2")
 
-	bundlesDir := filepath.Join(config.RepoDir(adminHome), "bundles")
-	beforeEntries, _ := os.ReadDir(bundlesDir)
-	beforeFiles := map[string]struct{}{}
-	for _, e := range beforeEntries {
-		beforeFiles[e.Name()] = struct{}{}
-	}
-
-	vaultPath := filepath.Join(config.RepoDir(adminHome), "admin", "vault.age")
-	vaultBefore, err := os.ReadFile(vaultPath)
+	identitiesBefore := repoIdentityCount(t, adminHome)
+	objectsBefore, err := os.ReadDir(objectsDir(config.RepoDir(adminHome)))
 	if err != nil {
-		t.Fatalf("read vault before: %v", err)
+		t.Fatalf("read objects before: %v", err)
 	}
 
 	refsBefore := collectEnrollRequestRefs(t, bareURL)
@@ -222,21 +250,15 @@ func TestApproveDryRun(t *testing.T) {
 		t.Fatalf("expected dry-run marker in output: %v", fake.Lines)
 	}
 
-	vaultAfter, err := os.ReadFile(vaultPath)
+	if got := repoIdentityCount(t, adminHome); got != identitiesBefore {
+		t.Fatalf("identities changed in dry-run: %d -> %d", identitiesBefore, got)
+	}
+	objectsAfter, err := os.ReadDir(objectsDir(config.RepoDir(adminHome)))
 	if err != nil {
-		t.Fatalf("read vault after: %v", err)
+		t.Fatalf("read objects after: %v", err)
 	}
-	if !bytes.Equal(vaultBefore, vaultAfter) {
-		t.Fatalf("vault changed in dry-run")
-	}
-
-	clientCfg, err := config.LoadClient(clientHome)
-	if err != nil {
-		t.Fatalf("load client: %v", err)
-	}
-	bundlePath := filepath.Join(bundlesDir, clientCfg.Host.ID+".age")
-	if _, err := os.Stat(bundlePath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("bundle should not exist after dry-run; stat err: %v", err)
+	if len(objectsAfter) != len(objectsBefore) {
+		t.Fatalf("objects changed in dry-run: %d -> %d", len(objectsBefore), len(objectsAfter))
 	}
 
 	refsAfter := collectEnrollRequestRefs(t, bareURL)
@@ -293,17 +315,12 @@ func TestApproveRejectsInvalidSignature(t *testing.T) {
 	}
 	branchRef := refs[0]
 	adminIDPath := config.AdminIdentityPath(adminHome)
-	repoMeta, err := readRepoJSON(t, adminHome)
-	if err != nil {
-		t.Fatalf("repo.json: %v", err)
-	}
-	adminRecips := make([]string, 0, len(repoMeta.AdminRecipients))
-	for _, r := range repoMeta.AdminRecipients {
-		adminRecips = append(adminRecips, r.Recipient)
-	}
+	adminRecips := storeAnchorRecipients(t, adminHome)
 	if err := tamperRequestSignature(t, bareURL, branchRef, adminIDPath, adminRecips); err != nil {
 		t.Fatalf("tamper request: %v", err)
 	}
+
+	identitiesBefore := repoIdentityCount(t, adminHome)
 
 	adminApp, fake := newApproveAdminApp(t, adminBase)
 	if err := runApprove(context.Background(), adminApp, &approveFlags{all: true, yes: true}); err != nil {
@@ -332,32 +349,16 @@ func TestApproveRejectsInvalidSignature(t *testing.T) {
 		t.Fatalf("tampered request should not be approved; lines: %v", fake.Lines)
 	}
 
-	vault := loadAdminVault(t, adminHome)
-	if len(vault.Hosts) != 0 {
-		t.Fatalf("vault should have no hosts after tampered approve, got %v", vault.Hosts)
+	if got := repoIdentityCount(t, adminHome); got != identitiesBefore {
+		t.Fatalf("identity enrolled from tampered request: %d -> %d", identitiesBefore, got)
 	}
 }
 
 func TestApproveRejectsMismatchedStoreID(t *testing.T) {
 	adminBase, adminHome, bareURL := setupAdminStore(t)
+	adminRecips := storeAnchorRecipients(t, adminHome)
 
-	cfg, err := config.LoadAdmin(adminHome)
-	if err != nil {
-		t.Fatalf("load admin: %v", err)
-	}
-	_ = cfg
-
-	repoMeta, err := readRepoJSON(t, adminHome)
-	if err != nil {
-		t.Fatalf("read repo.json: %v", err)
-	}
-	adminRecips := make([]string, 0, len(repoMeta.AdminRecipients))
-	for _, r := range repoMeta.AdminRecipients {
-		adminRecips = append(adminRecips, r.Recipient)
-	}
-
-	clientHome, _ := enrollFakeRequest(t, bareURL, adminRecips, "ks_wrongstoreidaaaa")
-	_ = clientHome
+	enrollFakeRequest(t, bareURL, adminRecips, "ks_wrongstoreidaaaa")
 
 	adminApp, fake := newApproveAdminApp(t, adminBase)
 	if err := runApprove(context.Background(), adminApp, &approveFlags{all: true, yes: true}); err != nil {
@@ -384,13 +385,16 @@ func TestApproveRejectsMismatchedStoreID(t *testing.T) {
 
 func TestApproveSpecificRequest(t *testing.T) {
 	adminBase, adminHome, bareURL := setupAdminStore(t)
-	clientA, requestA := enrollClientHome(t, bareURL, "machineA")
-	clientB, requestB := enrollClientHome(t, bareURL, "machineB")
-	_ = clientB
+	_, clientA, requestA := enrollClientHome(t, bareURL, "machineA")
+	_, clientB, requestB := enrollClientHome(t, bareURL, "machineB")
 
 	cfgA, err := config.LoadClient(clientA)
 	if err != nil {
 		t.Fatalf("load A: %v", err)
+	}
+	cfgB, err := config.LoadClient(clientB)
+	if err != nil {
+		t.Fatalf("load B: %v", err)
 	}
 
 	adminApp, fake := newApproveAdminApp(t, adminBase)
@@ -409,18 +413,11 @@ func TestApproveSpecificRequest(t *testing.T) {
 		t.Fatalf("expected 1 approval, got %d; lines: %v", approvedCount, fake.Lines)
 	}
 
-	vault := loadAdminVault(t, adminHome)
-	if _, ok := vault.Hosts[cfgA.Host.ID]; !ok {
-		t.Fatalf("vault missing host A %s; hosts: %v", cfgA.Host.ID, vault.Hosts)
+	if _, err := loadRepoIdentity(config.RepoDir(adminHome), cfgA.Host.ID); err != nil {
+		t.Fatalf("identity record for host A missing: %v", err)
 	}
-	if len(vault.Hosts) != 1 {
-		t.Fatalf("expected exactly 1 host approved, got %d: %v", len(vault.Hosts), vault.Hosts)
-	}
-	if _, ok := vault.Requests[requestA]; !ok {
-		t.Fatalf("vault missing request A %s", requestA)
-	}
-	if _, ok := vault.Requests[requestB]; ok {
-		t.Fatalf("vault should not contain request B %s yet", requestB)
+	if _, err := loadRepoIdentity(config.RepoDir(adminHome), cfgB.Host.ID); err == nil {
+		t.Fatalf("host B should not be enrolled yet")
 	}
 
 	refs := collectEnrollRequestRefs(t, bareURL)
@@ -596,19 +593,6 @@ func encodeB64(b []byte) string {
 	return base64.StdEncoding.EncodeToString(b)
 }
 
-func readRepoJSON(t *testing.T, adminHome string) (*repoJSON, error) {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join(config.RepoDir(adminHome), "repo.json"))
-	if err != nil {
-		return nil, err
-	}
-	var rj repoJSON
-	if err := json.Unmarshal(data, &rj); err != nil {
-		return nil, err
-	}
-	return &rj, nil
-}
-
 func enrollFakeRequest(t *testing.T, bareURL string, adminRecipients []string, storeID string) (clientHome string, requestID string) {
 	t.Helper()
 	clientHome = t.TempDir()
@@ -644,6 +628,7 @@ func enrollFakeRequest(t *testing.T, bareURL string, adminRecipients []string, s
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 		Host: model.RequestHost{
 			ID:                 hostID,
+			Kind:               "machine",
 			DisplayName:        "fakehost",
 			ReportedHostname:   "fakehost.example",
 			OS:                 "linux",
@@ -651,7 +636,7 @@ func enrollFakeRequest(t *testing.T, bareURL string, adminRecipients []string, s
 			AgeRecipient:       hostIdent.Recipient().String(),
 			GitDeployPublicKey: deployPub,
 		},
-		Requested: model.RequestedItems{Profiles: []string{"ssh"}},
+		Requested: model.RequestedItems{Paths: []string{"ssh"}},
 	}
 	signer := bundle.Ed25519FileSigner{Path: deployKeyPath}
 	ct, err := bundle.EncodeRequest(req, signer, agebox.X25519RecipientProvider{Strings: adminRecipients})

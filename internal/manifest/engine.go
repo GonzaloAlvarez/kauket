@@ -187,7 +187,7 @@ func (e *Engine) applyAdd(state *engineState, in Intent) (*Plan, error) {
 	}
 	prev, exists := ix.Entries[in.Key]
 	if exists && !in.Force {
-		return nil, fmt.Errorf("kauket: secret already exists at %s/%s; use --force to replace", pathName(state.tree, attachID), in.Key)
+		return nil, fmt.Errorf("%w at %s/%s; use --force to replace", ErrExists, pathName(state.tree, attachID), in.Key)
 	}
 
 	obj := *in.Secret

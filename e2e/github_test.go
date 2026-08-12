@@ -83,12 +83,12 @@ func TestGitHubInitEnrollApproveGet(t *testing.T) {
 	mustMkdir(t, clientHome, 0o700)
 
 	res := runKauket(t, bin, adminKauket, adminHome,
-		"init", "--owner", owner, "--repo", repo, "--private", "--yes")
+		"init", "--owner", owner, "--repo", repo, "--private", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
 	if res.err != nil {
 		t.Fatalf("init failed: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
-	if !strings.Contains(res.stdout, "initialized kauket store") {
-		t.Fatalf("expected 'initialized kauket store' in stdout, got: %q", res.stdout)
+	if !strings.Contains(res.stdout, "initialized kauket v2 store") {
+		t.Fatalf("expected 'initialized kauket v2 store' in stdout, got: %q", res.stdout)
 	}
 
 	view, err := ghRepoViewJSON(t, repoSlug)
@@ -188,7 +188,7 @@ func TestGitHubInitEnrollApproveGet(t *testing.T) {
 		}
 	}
 
-	if err := runLeakScan(t, filepath.Join(adminKauket, "repo")); err != nil {
+	if err := runLeakScan(t, filepath.Join(roleHomePath(adminKauket, "admin"), "repo")); err != nil {
 		t.Fatalf("leak scan: %v", err)
 	}
 }

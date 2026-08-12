@@ -49,12 +49,13 @@ func setupAdminStore(t *testing.T) (baseHome, adminHome, bareURL string) {
 	a, _, home := newTestApp(t)
 	url := bareRepo(t)
 	flags := &initFlags{
-		owner:    "GonzaloAlvarez",
-		repo:     "kauket-store",
-		private:  true,
-		remote:   url,
-		noGitHub: true,
-		yes:      true,
+		owner:       "GonzaloAlvarez",
+		repo:        "kauket-store",
+		private:     true,
+		remote:      url,
+		noGitHub:    true,
+		yes:         true,
+		recoveryOut: filepath.Join(t.TempDir(), "recovery"),
 	}
 	if err := runInit(context.Background(), a, flags); err != nil {
 		t.Fatalf("admin init: %v", err)
@@ -83,8 +84,8 @@ func TestEnrollSuccess(t *testing.T) {
 	if !strings.HasPrefix(fake.Lines[0], "created enrollment request rq_") {
 		t.Fatalf("first line %q does not start with created enrollment request rq_", fake.Lines[0])
 	}
-	if fake.Lines[1] != "requested profiles: ssh" {
-		t.Fatalf("second line %q, want %q", fake.Lines[1], "requested profiles: ssh")
+	if fake.Lines[1] != "requested paths: ssh" {
+		t.Fatalf("second line %q, want %q", fake.Lines[1], "requested paths: ssh")
 	}
 	if fake.Lines[2] != "waiting for approval" {
 		t.Fatalf("third line %q, want %q", fake.Lines[2], "waiting for approval")
@@ -223,7 +224,7 @@ func TestEnrollRefusesAlreadyEnrolled(t *testing.T) {
 		},
 		Repo: config.DefaultRepoInfo("GonzaloAlvarez", "kauket-store"),
 	}
-	if err := config.SaveClient(home, clientCfg); err != nil {
+	if err := config.SaveClient(config.RoleHome(home, config.RoleClient), clientCfg); err != nil {
 		t.Fatalf("save client: %v", err)
 	}
 	flags := &enrollFlags{
@@ -416,7 +417,7 @@ func TestEnrollRequestEncryptedToAdminRecipient(t *testing.T) {
 	if got.Host.DisplayName != "machine2" {
 		t.Fatalf("display name mismatch: %q", got.Host.DisplayName)
 	}
-	if len(got.Requested.Profiles) != 1 || got.Requested.Profiles[0] != "ssh" {
-		t.Fatalf("profiles: %v", got.Requested.Profiles)
+	if len(got.Requested.Paths) != 1 || got.Requested.Paths[0] != "ssh" {
+		t.Fatalf("paths: %v", got.Requested.Paths)
 	}
 }

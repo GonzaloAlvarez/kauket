@@ -30,7 +30,7 @@ func TestApproveLocalE2E(t *testing.T) {
 	}
 	remoteURL := setupBareRemote(t, bareDir)
 
-	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--yes")
+	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
 	if res.err != nil {
 		t.Fatalf("admin init: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -90,24 +90,24 @@ func TestApproveLocalE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tree: %v", err)
 	}
-	if _, err := tree.File("admin/vault.age"); err != nil {
-		t.Fatalf("main missing admin/vault.age: %v", err)
+	if _, err := tree.File("store.json"); err != nil {
+		t.Fatalf("main missing store.json: %v", err)
 	}
-	var bundleEntries []string
-	if subtree, err := tree.Tree("bundles"); err == nil {
+	var identityEntries []string
+	if subtree, err := tree.Tree("identities"); err == nil {
 		for _, e := range subtree.Entries {
-			bundleEntries = append(bundleEntries, e.Name)
+			identityEntries = append(identityEntries, e.Name)
 		}
 	}
-	hostBundleFound := false
-	for _, name := range bundleEntries {
-		if strings.HasPrefix(name, "h_") && strings.HasSuffix(name, ".age") {
-			hostBundleFound = true
+	hostIdentityFound := false
+	for _, name := range identityEntries {
+		if strings.HasPrefix(name, "h_") && strings.HasSuffix(name, ".json") {
+			hostIdentityFound = true
 			break
 		}
 	}
-	if !hostBundleFound {
-		t.Fatalf("main tree missing bundles/h_*.age entry; entries: %v", bundleEntries)
+	if !hostIdentityFound {
+		t.Fatalf("main tree missing identities/h_*.json entry; entries: %v", identityEntries)
 	}
 
 	refsAfter, _ := bare.References()

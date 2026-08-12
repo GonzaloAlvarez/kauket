@@ -39,6 +39,16 @@ func isV2Store(repoDir string) bool {
 	return err == nil
 }
 
+func requireV2StoreDir(repoDir string) error {
+	if isV2Store(repoDir) {
+		return nil
+	}
+	if _, err := os.Stat(repoDir); errors.Is(err, os.ErrNotExist) {
+		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: no local store clone found; run 'kauket sync' first")}
+	}
+	return &ExitError{Code: ExitUsage, Err: errors.New("kauket: this store uses the legacy v1 schema; migrate it with the kauket v2.0.x release ('kauket migrate-store') before using this version")}
+}
+
 func splitSecretPath(arg string) ([]string, string, error) {
 	var segments []string
 	if strings.Contains(arg, "/") {
@@ -146,6 +156,8 @@ func (c *v2Context) savePins() error {
 
 func translateManifestError(err error) error {
 	switch {
+	case errors.Is(err, manifest.ErrExists):
+		return &ExitError{Code: ExitUsage, Err: err}
 	case errors.Is(err, manifest.ErrNotFound):
 		return &ExitError{Code: ExitNotGranted, Err: err}
 	case errors.Is(err, manifest.ErrUntrustedSigner),

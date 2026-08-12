@@ -1,16 +1,8 @@
 package cli
 
 import (
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-
-	"github.com/gonzaloalvarez/kauket/internal/agebox"
 	"github.com/gonzaloalvarez/kauket/internal/app"
-	"github.com/gonzaloalvarez/kauket/internal/bundle"
 	"github.com/gonzaloalvarez/kauket/internal/config"
-	"github.com/gonzaloalvarez/kauket/internal/install"
 	"github.com/spf13/cobra"
 )
 
@@ -57,34 +49,10 @@ func statusAdmin(a *app.App, home string) error {
 	if err != nil {
 		return &ExitError{Code: ExitUsage, Err: err}
 	}
-	if isV2Store(config.RepoDir(home)) {
-		return statusV2(a, home, config.RoleAdmin, cfg.Admin.IdentityPath, cfg.V2)
+	if err := requireV2StoreDir(config.RepoDir(home)); err != nil {
+		return err
 	}
-	vaultPath := filepath.Join(config.RepoDir(home), "admin", "vault.age")
-	ct, err := os.ReadFile(vaultPath)
-	if err != nil {
-		return &ExitError{Code: ExitSync, Err: fmt.Errorf("kauket: read admin vault: %w", err)}
-	}
-	identityPath := cfg.Admin.IdentityPath
-	if !filepath.IsAbs(identityPath) {
-		identityPath = filepath.Join(home, identityPath)
-	}
-	vault, err := bundle.DecodeVault(ct, agebox.FileIdentityProvider{Path: identityPath})
-	if err != nil {
-		return &ExitError{Code: ExitCrypto, Err: fmt.Errorf("kauket: decrypt admin vault: %w", err)}
-	}
-	pending := 0
-	for _, r := range vault.Requests {
-		if r.Status == "" || r.Status == "pending" {
-			pending++
-		}
-	}
-	a.UI.Println("role: admin")
-	a.UI.Println(fmt.Sprintf("store: %s/%s", cfg.Repo.Owner, cfg.Repo.Name))
-	a.UI.Println(fmt.Sprintf("secrets: %d", len(vault.Secrets)))
-	a.UI.Println(fmt.Sprintf("hosts: %d", len(vault.Hosts)))
-	a.UI.Println(fmt.Sprintf("pending_requests: %d", pending))
-	return nil
+	return statusV2(a, home, config.RoleAdmin, cfg.Admin.IdentityPath, cfg.V2)
 }
 
 func statusClient(a *app.App, home string) error {
@@ -92,33 +60,8 @@ func statusClient(a *app.App, home string) error {
 	if err != nil {
 		return &ExitError{Code: ExitUsage, Err: err}
 	}
-	if isV2Store(config.RepoDir(home)) {
-		return statusV2(a, home, config.RoleClient, cfg.Host.IdentityPath, cfg.V2)
+	if err := requireV2StoreDir(config.RepoDir(home)); err != nil {
+		return err
 	}
-	bundlePath := filepath.Join(config.RepoDir(home), "bundles", cfg.Host.ID+".age")
-	bundleStatus := "absent"
-	if _, err := os.Stat(bundlePath); err == nil {
-		bundleStatus = "present"
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return &ExitError{Code: ExitSync, Err: fmt.Errorf("kauket: stat bundle: %w", err)}
-	}
-
-	lastSync := ""
-	state, stateErr := install.LoadState(home)
-	if stateErr == nil && state != nil {
-		var latest string
-		for _, e := range state.Installed {
-			if e.InstalledAt > latest {
-				latest = e.InstalledAt
-			}
-		}
-		lastSync = latest
-	}
-
-	a.UI.Println("role: client")
-	a.UI.Println(fmt.Sprintf("store: %s/%s", cfg.Repo.Owner, cfg.Repo.Name))
-	a.UI.Println(fmt.Sprintf("host_id: %s", cfg.Host.ID))
-	a.UI.Println(fmt.Sprintf("bundle: %s", bundleStatus))
-	a.UI.Println(fmt.Sprintf("last_sync: %s", lastSync))
-	return nil
+	return statusV2(a, home, config.RoleClient, cfg.Host.IdentityPath, cfg.V2)
 }

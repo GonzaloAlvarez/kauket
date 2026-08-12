@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"os"
 	"path/filepath"
@@ -40,8 +39,8 @@ func writeAWSFixture(t *testing.T, config, creds string) string {
 	return tempHome
 }
 
-func TestAddAWSProfileCapturesIntoVault(t *testing.T) {
-	a, fake, home := initAdminFixture(t)
+func TestAddAWSProfileCapturesIntoStore(t *testing.T) {
+	a, fake, _ := initAdminFixture(t)
 	tempHome := writeAWSFixture(t, awsCliConfigSection, awsCliCredsSection)
 
 	if err := runAdd(context.Background(), a, &addFlags{awsProfile: "amzn-wanfe"}, "", ""); err != nil {
@@ -53,10 +52,8 @@ func TestAddAWSProfileCapturesIntoVault(t *testing.T) {
 		"captured [profile amzn-wanfe] from " + filepath.Join(awsDir, "config"),
 		"captured [sso-session amzn] from " + filepath.Join(awsDir, "config"),
 		"captured [amzn-wanfe] from " + filepath.Join(awsDir, "credentials"),
-		"added aws.profile.amzn-wanfe",
-		"updated 0 host bundles",
 	}
-	if len(fake.Lines) != len(wantLines) {
+	if len(fake.Lines) != len(wantLines)+1 {
 		t.Fatalf("lines = %v", fake.Lines)
 	}
 	for i, w := range wantLines {
@@ -64,26 +61,16 @@ func TestAddAWSProfileCapturesIntoVault(t *testing.T) {
 			t.Fatalf("line %d = %q, want %q", i, fake.Lines[i], w)
 		}
 	}
+	if !strings.HasPrefix(fake.Lines[len(wantLines)], "added aws.profile.amzn-wanfe") {
+		t.Fatalf("final line = %q", fake.Lines[len(wantLines)])
+	}
 
-	v := loadAdminVault(t, home)
-	secret, ok := v.Secrets["aws.profile.amzn-wanfe"]
-	if !ok {
-		t.Fatalf("secret missing from vault")
-	}
-	if secret.Kind != "aws_profile" {
-		t.Fatalf("kind = %q", secret.Kind)
-	}
-	if secret.Install.Destination != "" || secret.Install.Mode != "" || secret.Install.DirectoryMode != "" {
-		t.Fatalf("install spec should be empty: %+v", secret.Install)
-	}
-	if len(secret.Profiles) != 1 || secret.Profiles[0] != "aws" {
-		t.Fatalf("profiles = %v", secret.Profiles)
-	}
-	raw, err := base64.StdEncoding.DecodeString(secret.ContentBase64)
-	if err != nil {
-		t.Fatalf("decode content: %v", err)
-	}
-	env, err := awsconfig.ParseEnvelope(raw)
+	out := captureStdout(t, func() {
+		if err := runGet(context.Background(), a, &getFlags{stdout: true, noSync: true}, "aws.profile.amzn-wanfe"); err != nil {
+			t.Fatalf("admin get: %v", err)
+		}
+	})
+	env, err := awsconfig.ParseEnvelope(out)
 	if err != nil {
 		t.Fatalf("parse envelope: %v", err)
 	}
@@ -194,7 +181,7 @@ func TestAddAWSProfileRequiresForceToReplace(t *testing.T) {
 	}
 	foundUpdated := false
 	for _, line := range fake.Lines {
-		if line == "updated aws.profile.amzn-wanfe" {
+		if strings.HasPrefix(line, "updated aws.profile.amzn-wanfe") {
 			foundUpdated = true
 			break
 		}

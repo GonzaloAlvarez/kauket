@@ -19,12 +19,13 @@ func TestSyncAdminAfterInit(t *testing.T) {
 	a, fake, _ := newTestApp(t)
 	remoteURL := bareRepo(t)
 	flags := &initFlags{
-		owner:    "GonzaloAlvarez",
-		repo:     "kauket-store",
-		private:  true,
-		remote:   remoteURL,
-		noGitHub: true,
-		yes:      true,
+		owner:       "GonzaloAlvarez",
+		repo:        "kauket-store",
+		private:     true,
+		remote:      remoteURL,
+		noGitHub:    true,
+		yes:         true,
+		recoveryOut: filepath.Join(t.TempDir(), "recovery"),
 	}
 	if err := runInit(context.Background(), a, flags); err != nil {
 		t.Fatalf("init: %v", err)

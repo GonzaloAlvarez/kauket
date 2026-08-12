@@ -20,7 +20,7 @@ func TestDualRoleLocalE2E(t *testing.T) {
 	mustMkdir(t, home, 0o700)
 	remoteURL := setupBareRemote(t, bareDir)
 
-	res := runKauket(t, bin, kauketHome, home, "init", "--remote", remoteURL, "--no-github", "--yes")
+	res := runKauket(t, bin, kauketHome, home, "init", "--remote", remoteURL, "--no-github", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
 	if res.err != nil {
 		t.Fatalf("init: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -75,8 +75,8 @@ func TestDualRoleLocalE2E(t *testing.T) {
 	}
 
 	for _, p := range []string{
-		filepath.Join(kauketHome, "admin", "repo", "repo.json"),
-		filepath.Join(kauketHome, "client", "repo", "repo.json"),
+		filepath.Join(kauketHome, "admin", "repo", "store.json"),
+		filepath.Join(kauketHome, "client", "repo", "store.json"),
 		filepath.Join(kauketHome, "admin", "repo.lock"),
 		filepath.Join(kauketHome, "client", "repo.lock"),
 	} {

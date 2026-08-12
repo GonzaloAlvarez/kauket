@@ -13,33 +13,33 @@ import (
 	"github.com/gonzaloalvarez/kauket/internal/ui"
 )
 
-func setupDualRoleHome(t *testing.T) (*app.App, *ui.Fake, string, string) {
+func setupDualRoleHome(t *testing.T) (*app.App, *ui.Fake, string, []byte) {
 	t.Helper()
 	base, _, bareURL := setupAdminStore(t)
 	fake := &ui.Fake{}
 	a := &app.App{UI: fake, Home: base}
+
+	keyPath := writeSSHKeyFixture(t)
+	keyContent, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	if err := runAdd(context.Background(), a, &addFlags{}, "ssh.main_private_key", keyPath); err != nil {
+		t.Fatalf("add in admin home: %v", err)
+	}
+
 	flags := &enrollFlags{requests: []string{"ssh"}, name: "dualhost", remote: bareURL, yes: true}
 	if err := runEnroll(context.Background(), a, flags); err != nil {
 		t.Fatalf("enroll in admin home: %v", err)
 	}
+	if err := runApprove(context.Background(), a, &approveFlags{all: true, yes: true}); err != nil {
+		t.Fatalf("approve in admin home: %v", err)
+	}
+	if err := runSync(context.Background(), a, ""); err != nil {
+		t.Fatalf("sync both roles: %v", err)
+	}
 	fake.Lines = nil
-	return a, fake, base, bareURL
-}
-
-func legacyizeRoleHome(t *testing.T, base, roleHome string) {
-	t.Helper()
-	entries, err := os.ReadDir(roleHome)
-	if err != nil {
-		t.Fatalf("read role home: %v", err)
-	}
-	for _, e := range entries {
-		if err := os.Rename(filepath.Join(roleHome, e.Name()), filepath.Join(base, e.Name())); err != nil {
-			t.Fatalf("move %s: %v", e.Name(), err)
-		}
-	}
-	if err := os.Remove(roleHome); err != nil {
-		t.Fatalf("remove role home: %v", err)
-	}
+	return a, fake, base, keyContent
 }
 
 func TestDualRoleSyncSyncsBothRoles(t *testing.T) {
@@ -73,6 +73,9 @@ func TestDualRoleStatusShowsBothSections(t *testing.T) {
 	if fake.Lines[0] != "role: admin" {
 		t.Fatalf("line 0: %q", fake.Lines[0])
 	}
+	if fake.Lines[2] != "schema: 2" {
+		t.Fatalf("line 2: %q", fake.Lines[2])
+	}
 	if fake.Lines[5] != "" {
 		t.Fatalf("line 5 should be blank separator, got %q", fake.Lines[5])
 	}
@@ -82,23 +85,8 @@ func TestDualRoleStatusShowsBothSections(t *testing.T) {
 }
 
 func TestDualRoleFullWorkflow(t *testing.T) {
-	a, fake, _, _ := setupDualRoleHome(t)
+	a, fake, _, keyContent := setupDualRoleHome(t)
 
-	keyPath := writeSSHKeyFixture(t)
-	if err := runAdd(context.Background(), a, &addFlags{}, "ssh.main_private_key", keyPath); err != nil {
-		t.Fatalf("add: %v", err)
-	}
-	fake.Lines = nil
-
-	if err := runApprove(context.Background(), a, &approveFlags{all: true, yes: true}); err != nil {
-		t.Fatalf("approve: %v", err)
-	}
-	fake.Lines = nil
-
-	want, err := os.ReadFile(keyPath)
-	if err != nil {
-		t.Fatalf("read fixture: %v", err)
-	}
 	var runErr error
 	out := captureStdout(t, func() {
 		runErr = runGet(context.Background(), a, &getFlags{stdout: true}, "ssh.main_private_key")
@@ -106,8 +94,8 @@ func TestDualRoleFullWorkflow(t *testing.T) {
 	if runErr != nil {
 		t.Fatalf("get: %v", runErr)
 	}
-	if string(out) != string(want) {
-		t.Fatalf("get output mismatch: got %q want %q", string(out), string(want))
+	if string(out) != string(keyContent) {
+		t.Fatalf("get output mismatch: got %q want %q", string(out), string(keyContent))
 	}
 	fake.Lines = nil
 
@@ -116,7 +104,7 @@ func TestDualRoleFullWorkflow(t *testing.T) {
 	}
 	wantLines := []string{
 		"role: admin",
-		"ssh.main_private_key  profiles=ssh  hosts=1",
+		"ssh.main_private_key",
 		"",
 		"role: client",
 		"ssh.main_private_key",
@@ -149,12 +137,13 @@ func TestDualRoleReverseOrderEnrollThenInit(t *testing.T) {
 	}
 
 	initFlagsV := &initFlags{
-		owner:    "GonzaloAlvarez",
-		repo:     "kauket-store",
-		private:  true,
-		remote:   bareRepo(t),
-		noGitHub: true,
-		yes:      true,
+		owner:       "GonzaloAlvarez",
+		repo:        "kauket-store",
+		private:     true,
+		remote:      bareRepo(t),
+		noGitHub:    true,
+		yes:         true,
+		recoveryOut: filepath.Join(t.TempDir(), "recovery"),
 	}
 	if err := runInit(context.Background(), a, initFlagsV); err != nil {
 		t.Fatalf("init after enroll: %v", err)
@@ -165,62 +154,6 @@ func TestDualRoleReverseOrderEnrollThenInit(t *testing.T) {
 	}
 	if _, err := config.LoadAdmin(config.RoleHome(base, config.RoleAdmin)); err != nil {
 		t.Fatalf("load admin: %v", err)
-	}
-}
-
-func TestEnrollOnLegacyAdminCreatesClientAlongside(t *testing.T) {
-	base, adminHome, bareURL := setupAdminStore(t)
-	legacyizeRoleHome(t, base, adminHome)
-
-	fake := &ui.Fake{}
-	a := &app.App{UI: fake, Home: base}
-	flags := &enrollFlags{requests: []string{"ssh"}, name: "dualhost", remote: bareURL, yes: true}
-	if err := runEnroll(context.Background(), a, flags); err != nil {
-		t.Fatalf("enroll on legacy admin home: %v", err)
-	}
-
-	if _, err := config.LoadClient(config.RoleHome(base, config.RoleClient)); err != nil {
-		t.Fatalf("load client: %v", err)
-	}
-	if _, err := config.LoadAdmin(base); err != nil {
-		t.Fatalf("legacy admin config should be untouched: %v", err)
-	}
-
-	fake.Lines = nil
-	if err := runStatus(a, ""); err != nil {
-		t.Fatalf("status: %v", err)
-	}
-	if fake.Lines[0] != "role: admin" || fake.Lines[6] != "role: client" {
-		t.Fatalf("expected both role sections, got %v", fake.Lines)
-	}
-}
-
-func TestLegacyAdminLayoutStillWorks(t *testing.T) {
-	base, adminHome, _ := setupAdminStore(t)
-	legacyizeRoleHome(t, base, adminHome)
-
-	fake := &ui.Fake{}
-	a := &app.App{UI: fake, Home: base}
-
-	keyPath := writeSSHKeyFixture(t)
-	if err := runAdd(context.Background(), a, &addFlags{}, "ssh.main_private_key", keyPath); err != nil {
-		t.Fatalf("add on legacy layout: %v", err)
-	}
-
-	fake.Lines = nil
-	if err := runSync(context.Background(), a, ""); err != nil {
-		t.Fatalf("sync on legacy layout: %v", err)
-	}
-	if len(fake.Lines) != 1 || fake.Lines[0] != "synced" {
-		t.Fatalf("single-role sync output must stay 'synced', got %v", fake.Lines)
-	}
-
-	fake.Lines = nil
-	if err := runStatus(a, ""); err != nil {
-		t.Fatalf("status on legacy layout: %v", err)
-	}
-	if fake.Lines[0] != "role: admin" {
-		t.Fatalf("status: %v", fake.Lines)
 	}
 }
 
@@ -255,7 +188,7 @@ func TestRoleFlagUninstalledRole(t *testing.T) {
 }
 
 func TestAddOnClientOnlyHomeHintsInit(t *testing.T) {
-	fx := setupClientNoBundle(t)
+	fx := setupClientOnlyHome(t)
 	keyPath := writeSSHKeyFixture(t)
 	err := runAdd(context.Background(), fx.app, &addFlags{}, "ssh.main_private_key", keyPath)
 	if err == nil {
@@ -267,22 +200,6 @@ func TestAddOnClientOnlyHomeHintsInit(t *testing.T) {
 	}
 	msg := err.Error()
 	if !strings.Contains(msg, "requires the admin role") || !strings.Contains(msg, "only has the client role") || !strings.Contains(msg, "kauket init") {
-		t.Fatalf("unexpected message: %q", msg)
-	}
-}
-
-func TestGetOnAdminOnlyHomeHintsEnroll(t *testing.T) {
-	a, _, _ := initAdminFixture(t)
-	err := runGet(context.Background(), a, &getFlags{noSync: true}, "ssh.main_private_key")
-	if err == nil {
-		t.Fatalf("expected error getting on admin-only home")
-	}
-	var exitErr *ExitError
-	if !errors.As(err, &exitErr) || exitErr.Code != ExitUsage {
-		t.Fatalf("expected ExitUsage, got %v", err)
-	}
-	msg := err.Error()
-	if !strings.Contains(msg, "requires the client role") || !strings.Contains(msg, "kauket enroll") {
 		t.Fatalf("unexpected message: %q", msg)
 	}
 }

@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"io"
 	"os"
@@ -10,61 +9,44 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 
-	"filippo.io/age"
-	gogit "github.com/go-git/go-git/v5"
-	gogitcfg "github.com/go-git/go-git/v5/config"
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/gonzaloalvarez/kauket/internal/agebox"
 	"github.com/gonzaloalvarez/kauket/internal/app"
-	"github.com/gonzaloalvarez/kauket/internal/bundle"
 	"github.com/gonzaloalvarez/kauket/internal/config"
-	"github.com/gonzaloalvarez/kauket/internal/model"
 	"github.com/gonzaloalvarez/kauket/internal/ui"
 )
 
 const testSecretID = "ssh.main_private_key"
 
-const testSecretContent = "PRIVATE KEY BODY"
-
-func mustGenerateIdentity(t *testing.T) *age.X25519Identity {
-	t.Helper()
-	id, err := agebox.GenerateIdentity()
-	if err != nil {
-		t.Fatalf("generate identity: %v", err)
-	}
-	return id
-}
-
-func writeIdentityToFile(t *testing.T, path string, id *age.X25519Identity) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatalf("mkdir identity dir: %v", err)
-	}
-	if err := os.WriteFile(path, []byte(id.String()+"\n"), 0o600); err != nil {
-		t.Fatalf("write identity: %v", err)
-	}
-}
-
 type clientFixture struct {
 	app      *app.App
 	fake     *ui.Fake
 	home     string
-	hostID   string
+	tempHome string
+	admin    *testAppBundle
 	dest     string
 	content  []byte
-	tempHome string
 	bareURL  string
 }
 
-func setupClient(t *testing.T) (*clientFixture, *age.X25519Identity, *age.X25519Identity) {
-	return setupClientLayout(t, false)
-}
-
-func setupClientLayout(t *testing.T, legacy bool) (*clientFixture, *age.X25519Identity, *age.X25519Identity) {
+func setupEnrolledClient(t *testing.T, requestPath string) *clientFixture {
 	t.Helper()
+	adminFx, _ := initV2Fixture(t)
+	adminHome := config.RoleHome(adminFx.home, config.RoleAdmin)
+	cfg, err := config.LoadAdmin(adminHome)
+	if err != nil {
+		t.Fatalf("load admin: %v", err)
+	}
+	bareURL := cfg.Repo.RemoteHTTPS
+
+	keyPath := writeSSHKeyFixture(t)
+	content, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatalf("read key fixture: %v", err)
+	}
+	if err := runAdd(context.Background(), adminFx.app, &addFlags{}, testSecretID, keyPath); err != nil {
+		t.Fatalf("add ssh: %v", err)
+	}
+
 	tempHome := t.TempDir()
 	resolved, err := filepath.EvalSymlinks(tempHome)
 	if err != nil {
@@ -74,170 +56,53 @@ func setupClientLayout(t *testing.T, legacy bool) (*clientFixture, *age.X25519Id
 	t.Setenv("HOME", tempHome)
 
 	kauketBase := filepath.Join(tempHome, ".config", "kauket")
-	kauketHome := kauketBase
-	if !legacy {
-		kauketHome = config.RoleHome(kauketBase, config.RoleClient)
-	}
-	if err := os.MkdirAll(kauketHome, 0o700); err != nil {
-		t.Fatalf("mkdir kauket home: %v", err)
-	}
-
-	bareURL := bareRepo(t)
-
 	fake := &ui.Fake{}
-	a := &app.App{
-		UI:   fake,
-		Home: kauketBase,
-		Now:  func() time.Time { return time.Date(2026, 5, 24, 14, 12, 33, 0, time.UTC) },
+	clientApp := &app.App{UI: fake, Home: kauketBase}
+	if err := runEnroll(context.Background(), clientApp, &enrollFlags{
+		requests: []string{requestPath}, name: "machine2", remote: bareURL, yes: true,
+	}); err != nil {
+		t.Fatalf("enroll: %v", err)
 	}
+	if err := runApprove(context.Background(), adminFx.app, &approveFlags{all: true, yes: true}); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if err := runSync(context.Background(), clientApp, ""); err != nil {
+		t.Fatalf("client sync: %v", err)
+	}
+	adminFx.fake.Lines = nil
+	fake.Lines = nil
 
-	hostIdentity := mustGenerateIdentity(t)
-	adminIdentity := mustGenerateIdentity(t)
-	hostIdentityPath := filepath.Join(kauketHome, "identities", "host.txt")
-	writeIdentityToFile(t, hostIdentityPath, hostIdentity)
+	return &clientFixture{
+		app:      clientApp,
+		fake:     fake,
+		home:     config.RoleHome(kauketBase, config.RoleClient),
+		tempHome: tempHome,
+		admin:    adminFx,
+		dest:     "~/.ssh/main_private_key",
+		content:  content,
+		bareURL:  bareURL,
+	}
+}
 
-	hostID := model.NewHostID()
+func setupClientOnlyHome(t *testing.T) *clientFixture {
+	t.Helper()
+	a, fake, base := newTestApp(t)
+	clientHome := config.RoleHome(base, config.RoleClient)
 	clientCfg := &config.Client{
 		Schema:  config.ConfigSchema,
 		Role:    config.RoleClient,
 		StoreID: "ks_test_store_id_",
 		Host: config.HostInfo{
-			ID:            hostID,
-			DisplayName:   "machine2",
-			IdentityPath:  filepath.Join("identities", "host.txt"),
-			DeployKeyPath: filepath.Join("git", "deploy_key"),
+			ID:           "h_clientonly12345",
+			DisplayName:  "machine2",
+			IdentityPath: filepath.Join("identities", "host.txt"),
 		},
-		Repo: config.RepoInfo{
-			Owner:         "GonzaloAlvarez",
-			Name:          "kauket-store",
-			RemoteHTTPS:   bareURL,
-			DefaultBranch: "main",
-		},
-		CommitAuthor: config.CommitAuthor{Name: "kauket-" + hostID, Email: "kauket@" + hostID + ".local"},
+		Repo: config.DefaultRepoInfo("GonzaloAlvarez", "kauket-store"),
 	}
-	if err := config.SaveClient(kauketHome, clientCfg); err != nil {
+	if err := config.SaveClient(clientHome, clientCfg); err != nil {
 		t.Fatalf("save client: %v", err)
 	}
-
-	return &clientFixture{
-		app:      a,
-		fake:     fake,
-		home:     kauketHome,
-		hostID:   hostID,
-		dest:     "~/.ssh/main_private_key",
-		content:  []byte(testSecretContent),
-		tempHome: tempHome,
-		bareURL:  bareURL,
-	}, hostIdentity, adminIdentity
-}
-
-func encryptBundleFor(t *testing.T, fx *clientFixture, hostIdentity, adminIdentity *age.X25519Identity, secrets map[string]model.BundleSecret) []byte {
-	t.Helper()
-	b := model.Bundle{
-		Schema:           1,
-		StoreID:          "ks_test_store_id_",
-		HostID:           fx.hostID,
-		GeneratedAt:      "2026-05-24T00:00:00Z",
-		BundleGeneration: 1,
-		Secrets:          secrets,
-	}
-	hostRecip := agebox.X25519RecipientProvider{Strings: []string{hostIdentity.Recipient().String()}}
-	adminRecips := agebox.X25519RecipientProvider{Strings: []string{adminIdentity.Recipient().String()}}
-	ct, err := bundle.EncodeHostBundle(b, hostRecip, adminRecips)
-	if err != nil {
-		t.Fatalf("encode bundle: %v", err)
-	}
-	return ct
-}
-
-func defaultBundleSecrets(fx *clientFixture) map[string]model.BundleSecret {
-	return map[string]model.BundleSecret{
-		testSecretID: {
-			Kind:          "file",
-			Install:       model.InstallSpec{Destination: fx.dest, Mode: "0600", DirectoryMode: "0700"},
-			ContentBase64: base64.StdEncoding.EncodeToString(fx.content),
-			SHA256:        "deadbeef",
-		},
-	}
-}
-
-func setupClientWithLocalBundle(t *testing.T) *clientFixture {
-	t.Helper()
-	fx, hostIdentity, adminIdentity := setupClient(t)
-	ct := encryptBundleFor(t, fx, hostIdentity, adminIdentity, defaultBundleSecrets(fx))
-	writeLocalBundle(t, fx.home, fx.hostID, ct)
-	return fx
-}
-
-func setupClientWithRemoteBundle(t *testing.T) *clientFixture {
-	t.Helper()
-	fx, hostIdentity, adminIdentity := setupClient(t)
-	ct := encryptBundleFor(t, fx, hostIdentity, adminIdentity, defaultBundleSecrets(fx))
-	pushBundleToBare(t, fx.bareURL, fx.hostID, ct)
-	return fx
-}
-
-func setupClientNoBundle(t *testing.T) *clientFixture {
-	t.Helper()
-	fx, _, _ := setupClient(t)
-	return fx
-}
-
-func writeLocalBundle(t *testing.T, kauketHome, hostID string, ct []byte) {
-	t.Helper()
-	bundlePath := filepath.Join(kauketHome, "repo", "bundles", hostID+".age")
-	if err := os.MkdirAll(filepath.Dir(bundlePath), 0o700); err != nil {
-		t.Fatalf("mkdir bundles: %v", err)
-	}
-	if err := os.WriteFile(bundlePath, ct, 0o600); err != nil {
-		t.Fatalf("write bundle: %v", err)
-	}
-}
-
-func pushBundleToBare(t *testing.T, bareURL, hostID string, ct []byte) {
-	t.Helper()
-	workDir := t.TempDir()
-	if err := os.RemoveAll(workDir); err != nil {
-		t.Fatalf("clean work dir: %v", err)
-	}
-	repo, err := gogit.PlainInit(workDir, false)
-	if err != nil {
-		t.Fatalf("init working: %v", err)
-	}
-	head := plumbing.NewSymbolicReference(plumbing.HEAD, plumbing.NewBranchReferenceName("main"))
-	if err := repo.Storer.SetReference(head); err != nil {
-		t.Fatalf("set HEAD: %v", err)
-	}
-	if _, err := repo.CreateRemote(&gogitcfg.RemoteConfig{
-		Name: "origin",
-		URLs: []string{bareURL},
-	}); err != nil {
-		t.Fatalf("create remote: %v", err)
-	}
-	bundleDir := filepath.Join(workDir, "bundles")
-	if err := os.MkdirAll(bundleDir, 0o700); err != nil {
-		t.Fatalf("mkdir bundles dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(bundleDir, hostID+".age"), ct, 0o600); err != nil {
-		t.Fatalf("write bundle in working: %v", err)
-	}
-	wt, err := repo.Worktree()
-	if err != nil {
-		t.Fatalf("worktree: %v", err)
-	}
-	if err := wt.AddWithOptions(&gogit.AddOptions{All: true}); err != nil {
-		t.Fatalf("add: %v", err)
-	}
-	sig := &object.Signature{Name: "test", Email: "test@example.com", When: time.Now()}
-	if _, err := wt.Commit("kauket: test bundle", &gogit.CommitOptions{Author: sig, Committer: sig}); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-	if err := repo.Push(&gogit.PushOptions{
-		RemoteName: "origin",
-		RefSpecs:   []gogitcfg.RefSpec{gogitcfg.RefSpec("refs/heads/main:refs/heads/main")},
-	}); err != nil {
-		t.Fatalf("push: %v", err)
-	}
+	return &clientFixture{app: a, fake: fake, home: clientHome}
 }
 
 func captureStdout(t *testing.T, fn func()) []byte {
@@ -260,7 +125,7 @@ func captureStdout(t *testing.T, fn func()) []byte {
 }
 
 func TestGetCreatesFile(t *testing.T) {
-	fx := setupClientWithRemoteBundle(t)
+	fx := setupEnrolledClient(t, "ssh")
 	flags := &getFlags{}
 	if err := runGet(context.Background(), fx.app, flags, testSecretID); err != nil {
 		t.Fatalf("runGet: %v", err)
@@ -280,8 +145,8 @@ func TestGetCreatesFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read dest: %v", err)
 	}
-	if string(got) != testSecretContent {
-		t.Fatalf("content mismatch: got %q want %q", string(got), testSecretContent)
+	if string(got) != string(fx.content) {
+		t.Fatalf("content mismatch: got %q want %q", string(got), string(fx.content))
 	}
 	if runtime.GOOS != "windows" {
 		fi, err := os.Stat(expanded)
@@ -301,27 +166,8 @@ func TestGetCreatesFile(t *testing.T) {
 	}
 }
 
-func TestGetLegacyRootLayout(t *testing.T) {
-	fx, hostIdentity, adminIdentity := setupClientLayout(t, true)
-	ct := encryptBundleFor(t, fx, hostIdentity, adminIdentity, defaultBundleSecrets(fx))
-	writeLocalBundle(t, fx.home, fx.hostID, ct)
-
-	flags := &getFlags{noSync: true}
-	if err := runGet(context.Background(), fx.app, flags, testSecretID); err != nil {
-		t.Fatalf("runGet on legacy layout: %v", err)
-	}
-	expanded := filepath.Join(fx.tempHome, ".ssh", "main_private_key")
-	got, err := os.ReadFile(expanded)
-	if err != nil {
-		t.Fatalf("read dest: %v", err)
-	}
-	if string(got) != testSecretContent {
-		t.Fatalf("content mismatch: got %q want %q", string(got), testSecretContent)
-	}
-}
-
 func TestGetIdempotentNoChange(t *testing.T) {
-	fx := setupClientWithLocalBundle(t)
+	fx := setupEnrolledClient(t, "ssh")
 	flags := &getFlags{noSync: true}
 	if err := runGet(context.Background(), fx.app, flags, testSecretID); err != nil {
 		t.Fatalf("first runGet: %v", err)
@@ -352,12 +198,12 @@ func TestGetIdempotentNoChange(t *testing.T) {
 	}
 }
 
-func TestGetMissingBundleReturnsExitNotGranted(t *testing.T) {
-	fx := setupClientNoBundle(t)
+func TestGetUnknownNamespaceReturnsExitNotGranted(t *testing.T) {
+	fx := setupEnrolledClient(t, "ssh")
 	flags := &getFlags{noSync: true}
-	err := runGet(context.Background(), fx.app, flags, testSecretID)
+	err := runGet(context.Background(), fx.app, flags, "other.unknown_secret")
 	if err == nil {
-		t.Fatalf("expected error on missing bundle")
+		t.Fatalf("expected error on unknown namespace")
 	}
 	var exitErr *ExitError
 	if !errors.As(err, &exitErr) {
@@ -366,15 +212,12 @@ func TestGetMissingBundleReturnsExitNotGranted(t *testing.T) {
 	if exitErr.Code != ExitNotGranted {
 		t.Fatalf("expected ExitNotGranted (%d), got %d", ExitNotGranted, exitErr.Code)
 	}
-	if !strings.Contains(err.Error(), "no approved bundle found") {
-		t.Fatalf("expected 'no approved bundle found', got %q", err.Error())
-	}
 }
 
-func TestGetSecretNotInBundle(t *testing.T) {
-	fx := setupClientWithLocalBundle(t)
+func TestGetSecretMissingFromGrantedNamespace(t *testing.T) {
+	fx := setupEnrolledClient(t, "ssh")
 	flags := &getFlags{noSync: true}
-	err := runGet(context.Background(), fx.app, flags, "aws.something_unknown")
+	err := runGet(context.Background(), fx.app, flags, "ssh.absent_key")
 	if err == nil {
 		t.Fatalf("expected error on missing secret")
 	}
@@ -385,21 +228,40 @@ func TestGetSecretNotInBundle(t *testing.T) {
 	if exitErr.Code != ExitNotGranted {
 		t.Fatalf("expected ExitNotGranted, got %d", exitErr.Code)
 	}
-	if !strings.Contains(err.Error(), "is not granted to this machine") {
-		t.Fatalf("expected 'is not granted to this machine', got %q", err.Error())
+	if !strings.Contains(err.Error(), "is not granted to this identity or does not exist") {
+		t.Fatalf("unexpected message: %q", err.Error())
+	}
+}
+
+func TestGetUngrantedNamespaceReturnsExitNotGranted(t *testing.T) {
+	adminApp, _, _, clientApp, _, _, _ := v2StoreFixture(t)
+	_ = adminApp
+	err := runGet(context.Background(), clientApp, &getFlags{noSync: true, stdout: true}, "aws.profile.amzn-wanfe")
+	if err == nil {
+		t.Fatalf("expected error on ungranted namespace")
+	}
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected ExitError, got %T", err)
+	}
+	if exitErr.Code != ExitNotGranted {
+		t.Fatalf("expected ExitNotGranted, got %d", exitErr.Code)
+	}
+	if !strings.Contains(err.Error(), "no readable child") {
+		t.Fatalf("unexpected message: %q", err.Error())
 	}
 }
 
 func TestGetStdoutMode(t *testing.T) {
-	fx := setupClientWithLocalBundle(t)
+	fx := setupEnrolledClient(t, "ssh")
 	flags := &getFlags{noSync: true, stdout: true}
 	out := captureStdout(t, func() {
 		if err := runGet(context.Background(), fx.app, flags, testSecretID); err != nil {
 			t.Fatalf("runGet: %v", err)
 		}
 	})
-	if string(out) != testSecretContent {
-		t.Fatalf("stdout content mismatch: got %q want %q", string(out), testSecretContent)
+	if string(out) != string(fx.content) {
+		t.Fatalf("stdout content mismatch: got %q want %q", string(out), string(fx.content))
 	}
 	for _, line := range fx.fake.Lines {
 		if strings.HasPrefix(line, "creating ") {
@@ -413,7 +275,7 @@ func TestGetStdoutMode(t *testing.T) {
 }
 
 func TestGetUnmanagedDestinationFailsWithoutForce(t *testing.T) {
-	fx := setupClientWithLocalBundle(t)
+	fx := setupEnrolledClient(t, "ssh")
 	expanded := filepath.Join(fx.tempHome, ".ssh", "main_private_key")
 	if err := os.MkdirAll(filepath.Dir(expanded), 0o700); err != nil {
 		t.Fatalf("mkdir ssh dir: %v", err)
@@ -447,7 +309,7 @@ func TestGetUnmanagedDestinationFailsWithoutForce(t *testing.T) {
 }
 
 func TestGetUnmanagedDestinationWithBackup(t *testing.T) {
-	fx := setupClientWithLocalBundle(t)
+	fx := setupEnrolledClient(t, "ssh")
 	expanded := filepath.Join(fx.tempHome, ".ssh", "main_private_key")
 	if err := os.MkdirAll(filepath.Dir(expanded), 0o700); err != nil {
 		t.Fatalf("mkdir ssh dir: %v", err)
@@ -466,8 +328,8 @@ func TestGetUnmanagedDestinationWithBackup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read dest: %v", err)
 	}
-	if string(got) != testSecretContent {
-		t.Fatalf("new content mismatch: got %q want %q", string(got), testSecretContent)
+	if string(got) != string(fx.content) {
+		t.Fatalf("new content mismatch: got %q want %q", string(got), string(fx.content))
 	}
 
 	entries, err := os.ReadDir(filepath.Dir(expanded))
@@ -495,7 +357,7 @@ func TestGetUnmanagedDestinationWithBackup(t *testing.T) {
 }
 
 func TestGetForceOverwrites(t *testing.T) {
-	fx := setupClientWithLocalBundle(t)
+	fx := setupEnrolledClient(t, "ssh")
 	expanded := filepath.Join(fx.tempHome, ".ssh", "main_private_key")
 	if err := os.MkdirAll(filepath.Dir(expanded), 0o700); err != nil {
 		t.Fatalf("mkdir ssh dir: %v", err)
@@ -513,8 +375,8 @@ func TestGetForceOverwrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read dest: %v", err)
 	}
-	if string(got) != testSecretContent {
-		t.Fatalf("content mismatch: got %q want %q", string(got), testSecretContent)
+	if string(got) != string(fx.content) {
+		t.Fatalf("content mismatch: got %q want %q", string(got), string(fx.content))
 	}
 }
 
@@ -522,7 +384,7 @@ func TestGetSymlinkRefused(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink test requires posix permissions")
 	}
-	fx := setupClientWithLocalBundle(t)
+	fx := setupEnrolledClient(t, "ssh")
 	expanded := filepath.Join(fx.tempHome, ".ssh", "main_private_key")
 	if err := os.MkdirAll(filepath.Dir(expanded), 0o700); err != nil {
 		t.Fatalf("mkdir ssh dir: %v", err)
@@ -549,191 +411,5 @@ func TestGetSymlinkRefused(t *testing.T) {
 	}
 	if _, err := os.Stat(target); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("symlink target should not be created; got err %v", err)
-	}
-}
-
-func TestGetInspectPrintsVaultSecret(t *testing.T) {
-	a, fake, _ := initAdminFixture(t)
-	keyPath := writeSSHKeyFixture(t)
-	if err := runAdd(context.Background(), a, &addFlags{}, "ssh.main_private_key", keyPath); err != nil {
-		t.Fatalf("runAdd: %v", err)
-	}
-	fake.Lines = nil
-
-	want, err := os.ReadFile(keyPath)
-	if err != nil {
-		t.Fatalf("read fixture: %v", err)
-	}
-
-	flags := &getFlags{inspect: true, noSync: true}
-	var runErr error
-	out := captureStdout(t, func() {
-		runErr = runGet(context.Background(), a, flags, "ssh.main_private_key")
-	})
-	if runErr != nil {
-		t.Fatalf("runGet --inspect: %v", runErr)
-	}
-	if string(out) != string(want) {
-		t.Fatalf("inspect output mismatch: got %q want %q", string(out), string(want))
-	}
-	for _, line := range fake.Lines {
-		if strings.TrimSpace(line) != "" {
-			t.Fatalf("inspect should not print to stdout via UI: %q", line)
-		}
-	}
-}
-
-func TestGetInspectUnknownSecret(t *testing.T) {
-	a, _, _ := initAdminFixture(t)
-	flags := &getFlags{inspect: true, noSync: true}
-	err := runGet(context.Background(), a, flags, "ssh.does_not_exist")
-	if err == nil {
-		t.Fatalf("expected error for unknown secret")
-	}
-	var exitErr *ExitError
-	if !errors.As(err, &exitErr) {
-		t.Fatalf("expected ExitError, got %T", err)
-	}
-	if exitErr.Code != ExitNotGranted {
-		t.Fatalf("expected ExitNotGranted, got %d", exitErr.Code)
-	}
-}
-
-func TestGetInspectRequiresAdminRole(t *testing.T) {
-	fx := setupClientWithLocalBundle(t)
-	flags := &getFlags{inspect: true, noSync: true}
-	err := runGet(context.Background(), fx.app, flags, testSecretID)
-	if err == nil {
-		t.Fatalf("expected error when client role uses --inspect")
-	}
-	var exitErr *ExitError
-	if !errors.As(err, &exitErr) {
-		t.Fatalf("expected ExitError, got %T", err)
-	}
-	if exitErr.Code != ExitUsage {
-		t.Fatalf("expected ExitUsage, got %d", exitErr.Code)
-	}
-	if !strings.Contains(err.Error(), "admin role") {
-		t.Fatalf("expected 'admin role' in error, got %q", err.Error())
-	}
-}
-
-func TestGetInspectRejectsInstallFlags(t *testing.T) {
-	a, _, _ := initAdminFixture(t)
-	flags := &getFlags{inspect: true, noSync: true, stdout: true}
-	err := runGet(context.Background(), a, flags, "ssh.main_private_key")
-	if err == nil {
-		t.Fatalf("expected error combining --inspect with --stdout")
-	}
-	var exitErr *ExitError
-	if !errors.As(err, &exitErr) {
-		t.Fatalf("expected ExitError, got %T", err)
-	}
-	if exitErr.Code != ExitUsage {
-		t.Fatalf("expected ExitUsage, got %d", exitErr.Code)
-	}
-}
-
-func setupAdminWithGrantedHost(t *testing.T) (*app.App, string, string) {
-	t.Helper()
-	a, fake, home := initAdminFixture(t)
-	hostID := "h_aaaaaaaaaaaaaaaa"
-	addHostGrant(t, home, hostID, "test-host", []string{"ssh"}, nil)
-	keyPath := writeSSHKeyFixture(t)
-	if err := runAdd(context.Background(), a, &addFlags{}, "ssh.main_private_key", keyPath); err != nil {
-		t.Fatalf("runAdd: %v", err)
-	}
-	fake.Lines = nil
-	return a, home, hostID
-}
-
-func TestGetAsHostPrintsBundleSecret(t *testing.T) {
-	a, _, hostID := setupAdminWithGrantedHost(t)
-
-	want := []byte("-----BEGIN OPENSSH PRIVATE KEY-----\nKAUKETTESTFAKEKEYDATA1234567890abcdefABCDEFghIJKL=\n-----END OPENSSH PRIVATE KEY-----\n")
-
-	flags := &getFlags{asHost: hostID, noSync: true}
-	var runErr error
-	out := captureStdout(t, func() {
-		runErr = runGet(context.Background(), a, flags, "ssh.main_private_key")
-	})
-	if runErr != nil {
-		t.Fatalf("runGet --as-host: %v", runErr)
-	}
-	if string(out) != string(want) {
-		t.Fatalf("as-host output mismatch: got %q want %q", string(out), string(want))
-	}
-}
-
-func TestGetAsHostSecretNotGranted(t *testing.T) {
-	a, _, hostID := setupAdminWithGrantedHost(t)
-	flags := &getFlags{asHost: hostID, noSync: true}
-	err := runGet(context.Background(), a, flags, "ssh.absent")
-	if err == nil {
-		t.Fatalf("expected error for secret not in host bundle")
-	}
-	var exitErr *ExitError
-	if !errors.As(err, &exitErr) {
-		t.Fatalf("expected ExitError, got %T", err)
-	}
-	if exitErr.Code != ExitNotGranted {
-		t.Fatalf("expected ExitNotGranted, got %d", exitErr.Code)
-	}
-	if !strings.Contains(err.Error(), "not granted to host") {
-		t.Fatalf("expected 'not granted to host' in error, got %q", err.Error())
-	}
-}
-
-func TestGetAsHostUnknownHost(t *testing.T) {
-	a, _, _ := initAdminFixture(t)
-	flags := &getFlags{asHost: "h_doesnotexist000", noSync: true}
-	err := runGet(context.Background(), a, flags, "ssh.main_private_key")
-	if err == nil {
-		t.Fatalf("expected error for unknown host")
-	}
-	var exitErr *ExitError
-	if !errors.As(err, &exitErr) {
-		t.Fatalf("expected ExitError, got %T", err)
-	}
-	if exitErr.Code != ExitNotGranted {
-		t.Fatalf("expected ExitNotGranted, got %d", exitErr.Code)
-	}
-	if !strings.Contains(err.Error(), "no bundle found for host") {
-		t.Fatalf("expected 'no bundle found for host' in error, got %q", err.Error())
-	}
-}
-
-func TestGetAsHostRequiresAdminRole(t *testing.T) {
-	fx := setupClientWithLocalBundle(t)
-	flags := &getFlags{asHost: "h_whatever00000000", noSync: true}
-	err := runGet(context.Background(), fx.app, flags, testSecretID)
-	if err == nil {
-		t.Fatalf("expected error when client role uses --as-host")
-	}
-	var exitErr *ExitError
-	if !errors.As(err, &exitErr) {
-		t.Fatalf("expected ExitError, got %T", err)
-	}
-	if exitErr.Code != ExitUsage {
-		t.Fatalf("expected ExitUsage, got %d", exitErr.Code)
-	}
-	if !strings.Contains(err.Error(), "admin role") {
-		t.Fatalf("expected 'admin role' in error, got %q", err.Error())
-	}
-}
-
-func TestGetInspectAndAsHostConflict(t *testing.T) {
-	a, _, _ := initAdminFixture(t)
-	flags := &getFlags{inspect: true, asHost: "h_aaaaaaaaaaaaaaaa", noSync: true}
-	err := runGet(context.Background(), a, flags, "ssh.main_private_key")
-	if err == nil {
-		t.Fatalf("expected error combining --inspect with --as-host")
-	}
-	var exitErr *ExitError
-	if !errors.As(err, &exitErr) {
-		t.Fatalf("expected ExitError, got %T", err)
-	}
-	if exitErr.Code != ExitUsage {
-		t.Fatalf("expected ExitUsage, got %d", exitErr.Code)
 	}
 }

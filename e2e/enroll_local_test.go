@@ -55,7 +55,7 @@ func TestEnrollLocalE2E(t *testing.T) {
 	}
 	remoteURL := setupBareRemote(t, bareDir)
 
-	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--yes")
+	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
 	if res.err != nil {
 		t.Fatalf("admin init failed: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -68,8 +68,8 @@ func TestEnrollLocalE2E(t *testing.T) {
 	if !strings.Contains(res.stdout, "created enrollment request rq_") {
 		t.Fatalf("expected 'created enrollment request rq_' in stdout, got: %q", res.stdout)
 	}
-	if !strings.Contains(res.stdout, "requested profiles: ssh") {
-		t.Fatalf("expected 'requested profiles: ssh' in stdout, got: %q", res.stdout)
+	if !strings.Contains(res.stdout, "requested paths: ssh") {
+		t.Fatalf("expected 'requested paths: ssh' in stdout, got: %q", res.stdout)
 	}
 	if !strings.Contains(res.stdout, "waiting for approval") {
 		t.Fatalf("expected 'waiting for approval' in stdout, got: %q", res.stdout)
@@ -164,7 +164,7 @@ func TestEnrollLocalE2EOnAdminHomeCreatesClientRole(t *testing.T) {
 	}
 	remoteURL := setupBareRemote(t, bareDir)
 
-	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--yes")
+	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
 	if res.err != nil {
 		t.Fatalf("admin init failed: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -179,6 +179,14 @@ func TestEnrollLocalE2EOnAdminHomeCreatesClientRole(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(adminKauket, "admin", "config.json")); err != nil {
 		t.Fatalf("admin role config missing: %v", err)
+	}
+
+	res = runKauket(t, bin, adminKauket, adminHome, "sync")
+	if res.err != nil {
+		t.Fatalf("sync failed: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
+	}
+	if !strings.Contains(res.stdout, "synced admin") || !strings.Contains(res.stdout, "synced client") {
+		t.Fatalf("sync should report both roles, got: %q", res.stdout)
 	}
 
 	res = runKauket(t, bin, adminKauket, adminHome, "status")

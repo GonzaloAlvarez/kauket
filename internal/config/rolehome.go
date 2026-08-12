@@ -27,7 +27,7 @@ func ResolveRoleHome(base string, role Role) (string, bool, error) {
 		return "", false, err
 	}
 	if got == role {
-		return base, true, nil
+		return "", false, fmt.Errorf("kauket: %s uses the legacy root-layout home; run 'kauket migrate' with the kauket v2.0.x release to move it into its role subdirectory", base)
 	}
 	return sub, false, nil
 }

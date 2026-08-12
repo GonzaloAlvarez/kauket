@@ -2,15 +2,21 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/gonzaloalvarez/kauket/internal/app"
 	"github.com/gonzaloalvarez/kauket/internal/awsconfig"
-	"github.com/gonzaloalvarez/kauket/internal/model"
+	"github.com/gonzaloalvarez/kauket/internal/bundle"
+	"github.com/gonzaloalvarez/kauket/internal/config"
+	"github.com/gonzaloalvarez/kauket/internal/manifest"
+	"github.com/gonzaloalvarez/kauket/internal/ui"
 )
 
 const (
@@ -18,39 +24,60 @@ const (
 	awsCliCredsSection  = "[amzn-wanfe]\naws_access_key_id = AKIAEXAMPLE\naws_secret_access_key = secretvalue\n"
 )
 
-func awsCliEnvelope(t *testing.T) []byte {
+func setupClientWithAWSProfile(t *testing.T) *clientFixture {
 	t.Helper()
-	data, err := awsconfig.Envelope{
-		Schema:      awsconfig.EnvelopeSchema,
-		Profile:     "amzn-wanfe",
-		Config:      awsCliConfigSection,
-		Credentials: awsCliCredsSection,
-	}.Marshal()
+	adminFx, _ := initV2Fixture(t)
+	adminHome := config.RoleHome(adminFx.home, config.RoleAdmin)
+	cfg, err := config.LoadAdmin(adminHome)
 	if err != nil {
-		t.Fatalf("marshal envelope: %v", err)
+		t.Fatalf("load admin: %v", err)
 	}
-	return data
-}
+	bareURL := cfg.Repo.RemoteHTTPS
 
-func setupClientWithAWSBundle(t *testing.T, envelope []byte, kind string) *clientFixture {
-	t.Helper()
-	fx, hostIdentity, adminIdentity := setupClient(t)
+	writeAWSFixture(t, awsCliConfigSection, awsCliCredsSection)
+	if err := runAdd(context.Background(), adminFx.app, &addFlags{awsProfile: "amzn-wanfe"}, "", ""); err != nil {
+		t.Fatalf("add aws profile: %v", err)
+	}
+
+	tempHome := t.TempDir()
+	resolved, err := filepath.EvalSymlinks(tempHome)
+	if err != nil {
+		t.Fatalf("eval symlinks: %v", err)
+	}
+	tempHome = resolved
+	t.Setenv("HOME", tempHome)
 	t.Setenv("AWS_CONFIG_FILE", "")
 	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", "")
-	secrets := map[string]model.BundleSecret{
-		"aws.profile.amzn-wanfe": {
-			Kind:          kind,
-			ContentBase64: base64.StdEncoding.EncodeToString(envelope),
-			SHA256:        "deadbeef",
-		},
+
+	kauketBase := filepath.Join(tempHome, ".config", "kauket")
+	fake := &ui.Fake{}
+	clientApp := &app.App{UI: fake, Home: kauketBase}
+	if err := runEnroll(context.Background(), clientApp, &enrollFlags{
+		requests: []string{"aws/profile"}, name: "machine2", remote: bareURL, yes: true,
+	}); err != nil {
+		t.Fatalf("enroll: %v", err)
 	}
-	ct := encryptBundleFor(t, fx, hostIdentity, adminIdentity, secrets)
-	writeLocalBundle(t, fx.home, fx.hostID, ct)
-	return fx
+	if err := runApprove(context.Background(), adminFx.app, &approveFlags{all: true, yes: true}); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if err := runSync(context.Background(), clientApp, ""); err != nil {
+		t.Fatalf("client sync: %v", err)
+	}
+	adminFx.fake.Lines = nil
+	fake.Lines = nil
+
+	return &clientFixture{
+		app:      clientApp,
+		fake:     fake,
+		home:     config.RoleHome(kauketBase, config.RoleClient),
+		tempHome: tempHome,
+		admin:    adminFx,
+		bareURL:  bareURL,
+	}
 }
 
 func TestGetAWSProfileMergesAlongsideExisting(t *testing.T) {
-	fx := setupClientWithAWSBundle(t, awsCliEnvelope(t), "aws_profile")
+	fx := setupClientWithAWSProfile(t)
 	awsDir := filepath.Join(fx.tempHome, ".aws")
 	if err := os.MkdirAll(awsDir, 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -94,7 +121,7 @@ func TestGetAWSProfileMergesAlongsideExisting(t *testing.T) {
 }
 
 func TestGetAWSProfileAlreadyCurrent(t *testing.T) {
-	fx := setupClientWithAWSBundle(t, awsCliEnvelope(t), "aws_profile")
+	fx := setupClientWithAWSProfile(t)
 	flags := &getFlags{noSync: true}
 	if err := runGet(context.Background(), fx.app, flags, "aws.profile.amzn-wanfe"); err != nil {
 		t.Fatalf("first runGet: %v", err)
@@ -109,26 +136,84 @@ func TestGetAWSProfileAlreadyCurrent(t *testing.T) {
 }
 
 func TestGetAWSProfileStdout(t *testing.T) {
-	envelope := awsCliEnvelope(t)
-	fx := setupClientWithAWSBundle(t, envelope, "aws_profile")
+	fx := setupClientWithAWSProfile(t)
 	flags := &getFlags{noSync: true, stdout: true}
 	out := captureStdout(t, func() {
 		if err := runGet(context.Background(), fx.app, flags, "aws.profile.amzn-wanfe"); err != nil {
 			t.Fatalf("runGet: %v", err)
 		}
 	})
-	if string(out) != string(envelope) {
-		t.Fatalf("stdout = %q, want envelope", out)
+	env, err := awsconfig.ParseEnvelope(out)
+	if err != nil {
+		t.Fatalf("stdout is not an aws envelope: %v", err)
+	}
+	if env.Profile != "amzn-wanfe" {
+		t.Fatalf("envelope profile = %q", env.Profile)
+	}
+	if !strings.Contains(env.Config, "[profile amzn-wanfe]") || !strings.Contains(env.Config, "[sso-session amzn]") {
+		t.Fatalf("envelope config = %q", env.Config)
+	}
+	if env.Credentials != awsCliCredsSection {
+		t.Fatalf("envelope credentials = %q", env.Credentials)
 	}
 	if _, err := os.Stat(filepath.Join(fx.tempHome, ".aws")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("stdout mode should not touch ~/.aws; stat err = %v", err)
 	}
 }
 
+func addRawKindObject(t *testing.T, fx *testAppBundle, secretID, kind string, content []byte) {
+	t.Helper()
+	adminHome := config.RoleHome(fx.home, config.RoleAdmin)
+	cfg, err := config.LoadAdmin(adminHome)
+	if err != nil {
+		t.Fatalf("load admin: %v", err)
+	}
+	vctx, err := loadV2Context(adminHome, cfg.Admin.IdentityPath, cfg.V2)
+	if err != nil {
+		t.Fatalf("load v2 context: %v", err)
+	}
+	signKeyPath := cfg.V2.SignKeyPath
+	if !filepath.IsAbs(signKeyPath) {
+		signKeyPath = filepath.Join(adminHome, signKeyPath)
+	}
+	signerPub, err := ensureSignKey(signKeyPath)
+	if err != nil {
+		t.Fatalf("sign key: %v", err)
+	}
+	path, key, err := splitSecretPath(secretID)
+	if err != nil {
+		t.Fatalf("split path: %v", err)
+	}
+	sum := sha256.Sum256(content)
+	engine := &manifest.Engine{
+		ObjectsDir: objectsDir(vctx.repoDir),
+		Root:       vctx.root,
+		Pins:       vctx.pins,
+		Identity:   vctx.identity,
+		Signer:     bundle.Ed25519FileSigner{Path: signKeyPath},
+		SignerPub:  signerPub,
+		ActorID:    cfg.V2.IdentityID,
+	}
+	if _, err := engine.Apply(manifest.Intent{
+		Op: manifest.OpAdd, Path: path, Key: key,
+		Secret: &manifest.Object{
+			Kind:          kind,
+			ContentBase64: base64.StdEncoding.EncodeToString(content),
+			SHA256:        hex.EncodeToString(sum[:]),
+		},
+	}); err != nil {
+		t.Fatalf("engine apply: %v", err)
+	}
+	if err := vctx.savePins(); err != nil {
+		t.Fatalf("save pins: %v", err)
+	}
+}
+
 func TestGetUnsupportedKind(t *testing.T) {
-	fx := setupClientWithAWSBundle(t, awsCliEnvelope(t), "pkcs11")
-	flags := &getFlags{noSync: true}
-	err := runGet(context.Background(), fx.app, flags, "aws.profile.amzn-wanfe")
+	fx, _ := initV2Fixture(t)
+	addRawKindObject(t, fx, "weird.thing", "pkcs11", []byte("OPAQUE"))
+
+	err := runGet(context.Background(), fx.app, &getFlags{noSync: true}, "weird.thing")
 	if err == nil {
 		t.Fatalf("expected error for unsupported kind")
 	}
@@ -142,7 +227,7 @@ func TestGetUnsupportedKind(t *testing.T) {
 }
 
 func TestGetAWSProfileUnmanagedSection(t *testing.T) {
-	fx := setupClientWithAWSBundle(t, awsCliEnvelope(t), "aws_profile")
+	fx := setupClientWithAWSProfile(t)
 	awsDir := filepath.Join(fx.tempHome, ".aws")
 	if err := os.MkdirAll(awsDir, 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)

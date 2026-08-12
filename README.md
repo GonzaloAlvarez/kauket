@@ -49,24 +49,16 @@ kauket get ...              # client commands use client/
 kauket status               # shows both roles; --role admin|client narrows
 ```
 
-Pre-existing installs that keep `config.json` at the `KAUKET_HOME` root continue to work unchanged. To normalize one into the role-subdirectory layout, run `kauket migrate`.
+The role-subdirectory layout is the only supported home layout since v2.1.0. A pre-role-homes install that keeps `config.json` at the `KAUKET_HOME` root must be normalized once with `kauket migrate` from the [v2.0.x release](https://github.com/GonzaloAlvarez/kauket/releases/tag/v2.0.0) before upgrading.
 
-To consolidate two existing single-role homes into one:
-
-```sh
-KAUKET_HOME=~/.config/kauket kauket migrate   # move the default home's role into its subdir
-mv $OLD_CLIENT_HOME ~/.config/kauket/client   # bring the other role in as client/ (or admin/)
-kauket status                                 # shows both roles
-```
-
-All paths stored in a role's config are relative, so a role home is relocatable as a unit.
+To consolidate two existing single-role homes into one, move each role home in as a subdirectory (`~/.config/kauket/admin/`, `~/.config/kauket/client/`) — all paths stored in a role's config are relative, so a role home is relocatable as a unit.
 
 ## Namespace stores (v2)
 
 v2 replaces the single admin vault and per-host bundles with a tree of namespace nodes, each with its own owners and readers. There is no admin role: whoever owns a node grants, revokes, and delegates access to it. Identities (people or machines) request access at any time; owners approve. Every node manifest is signed, so a repo writer cannot forge a grant, and clients verify the signature chain and content hashes before installing.
 
 ```sh
-kauket init --v2 --recovery-out ~/kauket-recovery   # found a namespace store (move recovery keys offline)
+kauket init --recovery-out ~/kauket-recovery        # found a namespace store (move recovery keys offline)
 kauket add aws.profile.amzn-wanfe ...               # dotted ids are namespace paths
 kauket enroll --request aws/profile                 # a machine requests a namespace path
 kauket approve                                       # owner approves; grants the requested path
@@ -79,7 +71,7 @@ kauket verify                                        # audit the chain and hashe
 kauket inspect --as i_9d2e                           # what can this identity read?
 ```
 
-Migrate an existing v1 store in place with `kauket migrate-store --recovery-out <dir>`: dotted ids become the tree, per-host grants are materialized exactly, hosts keep their identities and deploy keys (no re-enrollment), and the v1 vault/bundles stay frozen for un-upgraded clients until `kauket migrate-store --purge-v1`. See [`specs/design-v2.0-namespace-acl.md`](specs/design-v2.0-namespace-acl.md) and ADRs 0004–0006.
+Namespace stores are the only supported schema since v2.1.0. A legacy v1 store (single admin vault + per-host bundles) must be migrated with `kauket migrate-store --recovery-out <dir>` from the [v2.0.x release](https://github.com/GonzaloAlvarez/kauket/releases/tag/v2.0.0), which remains permanently downloadable as the designated stepping-stone: dotted ids become the tree, per-host grants are materialized exactly, and hosts keep their identities and deploy keys (no re-enrollment). See [`specs/design-v2.0-namespace-acl.md`](specs/design-v2.0-namespace-acl.md) and ADRs 0004–0006.
 
 ## Install
 

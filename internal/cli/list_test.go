@@ -11,8 +11,7 @@ import (
 )
 
 func TestListAdminOutput(t *testing.T) {
-	a, fake, home := initAdminFixture(t)
-	_, _ = addHostGrant(t, home, "h_aaaaaaaaaaaaaaaa", "test-host", []string{"ssh", "aws"}, nil)
+	a, fake, _ := initAdminFixture(t)
 
 	keyPath := writeSSHKeyFixture(t)
 	if err := runAdd(context.Background(), a, &addFlags{}, "ssh.main_private_key", keyPath); err != nil {
@@ -32,8 +31,8 @@ func TestListAdminOutput(t *testing.T) {
 		t.Fatalf("expected 2 lines, got %d: %v", len(fake.Lines), fake.Lines)
 	}
 	want := []string{
-		"aws.primary_account.key_file  profiles=aws  hosts=1",
-		"ssh.main_private_key  profiles=ssh  hosts=1",
+		"aws.primary_account.key_file",
+		"ssh.main_private_key",
 	}
 	for i, w := range want {
 		if fake.Lines[i] != w {
@@ -48,12 +47,13 @@ func TestListAdminEmpty(t *testing.T) {
 		t.Fatalf("list: %v", err)
 	}
 	if len(fake.Lines) != 0 {
-		t.Fatalf("expected zero lines for empty vault, got %v", fake.Lines)
+		t.Fatalf("expected zero lines for empty store, got %v", fake.Lines)
 	}
 }
 
-func TestListClientNoBundle(t *testing.T) {
+func TestListClientNoStoreClone(t *testing.T) {
 	a, _, home := newTestApp(t)
+	clientHome := config.RoleHome(home, config.RoleClient)
 	clientCfg := &config.Client{
 		Schema:  config.ConfigSchema,
 		Role:    config.RoleClient,
@@ -65,22 +65,22 @@ func TestListClientNoBundle(t *testing.T) {
 		},
 		Repo: config.DefaultRepoInfo("GonzaloAlvarez", "kauket-store"),
 	}
-	if err := config.SaveClient(home, clientCfg); err != nil {
+	if err := config.SaveClient(clientHome, clientCfg); err != nil {
 		t.Fatalf("save client: %v", err)
 	}
 	err := runList(a, "")
 	if err == nil {
-		t.Fatalf("expected error when no bundle present")
+		t.Fatalf("expected error when no store clone present")
 	}
 	var exitErr *ExitError
 	if !errors.As(err, &exitErr) {
 		t.Fatalf("expected ExitError, got %T", err)
 	}
-	if exitErr.Code != ExitNotGranted {
-		t.Fatalf("expected ExitNotGranted=%d, got %d", ExitNotGranted, exitErr.Code)
+	if exitErr.Code != ExitUsage {
+		t.Fatalf("expected ExitUsage=%d, got %d", ExitUsage, exitErr.Code)
 	}
-	if !strings.Contains(err.Error(), "no approved bundle") {
-		t.Fatalf("expected no-approved-bundle message, got %q", err.Error())
+	if !strings.Contains(err.Error(), "kauket sync") {
+		t.Fatalf("expected sync-first hint, got %q", err.Error())
 	}
 }
 

@@ -34,7 +34,7 @@ func TestGetLocalE2E(t *testing.T) {
 	}
 	remoteURL := setupBareRemote(t, bareDir)
 
-	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--yes")
+	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
 	if res.err != nil {
 		t.Fatalf("admin init failed: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}

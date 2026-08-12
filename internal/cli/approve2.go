@@ -60,6 +60,15 @@ func runApproveV2(ctx context.Context, a *app.App, home string, cfg *config.Admi
 		}
 		valid = append(valid, v2Request{req: req, branch: ref.Branch})
 	}
+	if f.request != "" {
+		filtered := valid[:0]
+		for _, v := range valid {
+			if v.req.RequestID == f.request {
+				filtered = append(filtered, v)
+			}
+		}
+		valid = filtered
+	}
 	if len(valid) == 0 {
 		a.UI.Println("nothing to approve")
 		return nil

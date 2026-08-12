@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -173,7 +174,7 @@ func runEnrollV2(ctx context.Context, a *app.App, f *enrollFlags, home string, r
 	if f.offline {
 		a.UI.Println("created offline enrollment request")
 		a.UI.Println("")
-		a.UI.Println(fmt.Sprintf("kauket approve --request-code %s", requestID))
+		a.UI.Println(fmt.Sprintf("kauket approve --request-code %s", base64.StdEncoding.EncodeToString(ct)))
 	} else {
 		if err := pushEnrollmentRequest(ctx, a, home, remoteURL, transport, requestID, ct, syntheticAuthor, now); err != nil {
 			return &ExitError{Code: ExitSync, Err: err}

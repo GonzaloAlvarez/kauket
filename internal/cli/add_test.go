@@ -9,124 +9,16 @@ import (
 	"strings"
 	"testing"
 
-	"filippo.io/age"
-	"github.com/gonzaloalvarez/kauket/internal/agebox"
 	"github.com/gonzaloalvarez/kauket/internal/app"
-	"github.com/gonzaloalvarez/kauket/internal/bundle"
 	"github.com/gonzaloalvarez/kauket/internal/config"
-	"github.com/gonzaloalvarez/kauket/internal/gitstore"
-	"github.com/gonzaloalvarez/kauket/internal/model"
 	"github.com/gonzaloalvarez/kauket/internal/ui"
 )
 
 func initAdminFixture(t *testing.T) (*app.App, *ui.Fake, string) {
 	t.Helper()
-	a, fake, home := newTestApp(t)
-	remoteURL := bareRepo(t)
-	flags := &initFlags{
-		owner:    "GonzaloAlvarez",
-		repo:     "kauket-store",
-		private:  true,
-		remote:   remoteURL,
-		noGitHub: true,
-		yes:      true,
-	}
-	if err := runInit(context.Background(), a, flags); err != nil {
-		t.Fatalf("init: %v", err)
-	}
-	fake.Lines = nil
-	return a, fake, config.RoleHome(home, config.RoleAdmin)
-}
-
-func loadAdminVault(t *testing.T, home string) model.Vault {
-	t.Helper()
-	cfg, err := config.LoadAdmin(home)
-	if err != nil {
-		t.Fatalf("load admin: %v", err)
-	}
-	vaultPath := filepath.Join(config.RepoDir(home), "admin", "vault.age")
-	ct, err := os.ReadFile(vaultPath)
-	if err != nil {
-		t.Fatalf("read vault: %v", err)
-	}
-	idPath := cfg.Admin.IdentityPath
-	if !filepath.IsAbs(idPath) {
-		idPath = filepath.Join(home, idPath)
-	}
-	v, err := bundle.DecodeVault(ct, agebox.FileIdentityProvider{Path: idPath})
-	if err != nil {
-		t.Fatalf("decode vault: %v", err)
-	}
-	return v
-}
-
-func writeAdminVault(t *testing.T, home string, v model.Vault) {
-	t.Helper()
-	recips := make([]string, 0, len(v.Admins))
-	for _, a := range v.Admins {
-		recips = append(recips, a.Recipient)
-	}
-	ct, err := bundle.EncodeVault(v, agebox.X25519RecipientProvider{Strings: recips})
-	if err != nil {
-		t.Fatalf("encode vault: %v", err)
-	}
-	vaultPath := filepath.Join(config.RepoDir(home), "admin", "vault.age")
-	if err := os.WriteFile(vaultPath, ct, 0o600); err != nil {
-		t.Fatalf("write vault: %v", err)
-	}
-	commitAdminChanges(t, home)
-}
-
-func commitAdminChanges(t *testing.T, home string) {
-	t.Helper()
-	cfg, err := config.LoadAdmin(home)
-	if err != nil {
-		t.Fatalf("load admin: %v", err)
-	}
-	store, err := gitstore.OpenOrClone(context.Background(), gitstore.Config{
-		RepoPath: config.RepoDir(home),
-		URL:      cfg.Repo.RemoteHTTPS,
-		LockPath: config.LockPath(home),
-	}, gitstore.FileURLTransport{})
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer store.Close()
-	author := gitstore.Author{Name: cfg.CommitAuthor.Name, Email: cfg.CommitAuthor.Email}
-	if err := store.CommitAndPush(context.Background(), "kauket: update vault", author); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-}
-
-func addHostGrant(t *testing.T, home, hostID, displayName string, profiles, secrets []string) (*age.X25519Identity, string) {
-	t.Helper()
-	hostIdentity, err := agebox.GenerateIdentity()
-	if err != nil {
-		t.Fatalf("generate host identity: %v", err)
-	}
-	hostIdentityPath := filepath.Join(home, "identities", "host_"+hostID+".txt")
-	if err := os.MkdirAll(filepath.Dir(hostIdentityPath), 0o700); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(hostIdentityPath, []byte(hostIdentity.String()+"\n"), 0o600); err != nil {
-		t.Fatalf("write host id: %v", err)
-	}
-	v := loadAdminVault(t, home)
-	if v.Hosts == nil {
-		v.Hosts = map[string]model.Host{}
-	}
-	v.Hosts[hostID] = model.Host{
-		DisplayName:          displayName,
-		ReportedHostname:     displayName,
-		AgeRecipient:         hostIdentity.Recipient().String(),
-		DeployKeyFingerprint: "SHA256:test",
-		GrantedProfiles:      profiles,
-		GrantedSecrets:       secrets,
-		CreatedAt:            v.UpdatedAt,
-		ApprovedAt:           v.UpdatedAt,
-	}
-	writeAdminVault(t, home, v)
-	return hostIdentity, hostIdentityPath
+	fx, _ := initV2Fixture(t)
+	fx.fake.Lines = nil
+	return fx.app, fx.fake, config.RoleHome(fx.home, config.RoleAdmin)
 }
 
 func writeSSHKeyFixture(t *testing.T) string {
@@ -139,70 +31,66 @@ func writeSSHKeyFixture(t *testing.T) string {
 	return path
 }
 
-func TestAddSshSecretRebuildsBundlesForGrantedHost(t *testing.T) {
+func TestAddSshSecretInfersSpecAndStaysEncrypted(t *testing.T) {
 	a, fake, home := initAdminFixture(t)
-	hostID := "h_aaaaaaaaaaaaaaaa"
-	hostIdentity, hostIdentityPath := addHostGrant(t, home, hostID, "test-host", []string{"ssh"}, nil)
-	_ = hostIdentity
 
 	keyPath := writeSSHKeyFixture(t)
 	if err := runAdd(context.Background(), a, &addFlags{}, "ssh.main_private_key", keyPath); err != nil {
 		t.Fatalf("runAdd: %v", err)
 	}
 
-	if len(fake.Lines) != 2 {
-		t.Fatalf("expected 2 lines, got %d: %v", len(fake.Lines), fake.Lines)
+	if len(fake.Lines) != 1 {
+		t.Fatalf("expected 1 line, got %d: %v", len(fake.Lines), fake.Lines)
 	}
-	if fake.Lines[0] != "added ssh.main_private_key" {
+	if !strings.HasPrefix(fake.Lines[0], "added ssh.main_private_key") {
 		t.Fatalf("line 0: %q", fake.Lines[0])
 	}
-	if fake.Lines[1] != "updated 1 host bundles" {
-		t.Fatalf("line 1: %q", fake.Lines[1])
-	}
 
-	v := loadAdminVault(t, home)
-	secret, ok := v.Secrets["ssh.main_private_key"]
-	if !ok {
-		t.Fatalf("secret missing from vault")
-	}
-	if secret.Install.Destination != "~/.ssh/main_private_key" {
-		t.Fatalf("dest: %q", secret.Install.Destination)
-	}
-	if len(secret.Profiles) != 1 || secret.Profiles[0] != "ssh" {
-		t.Fatalf("profiles: %v", secret.Profiles)
-	}
-	if secret.SHA256 == "" {
-		t.Fatalf("sha256 empty")
-	}
-
-	bundlePath := filepath.Join(config.RepoDir(home), "bundles", hostID+".age")
-	ct, err := os.ReadFile(bundlePath)
+	want, err := os.ReadFile(keyPath)
 	if err != nil {
-		t.Fatalf("read bundle: %v", err)
+		t.Fatalf("read fixture: %v", err)
 	}
-	hostBundle, err := bundle.DecodeHostBundle(ct, agebox.FileIdentityProvider{Path: hostIdentityPath})
-	if err != nil {
-		t.Fatalf("decode bundle with host id: %v", err)
-	}
-	if _, ok := hostBundle.Secrets["ssh.main_private_key"]; !ok {
-		t.Fatalf("bundle missing secret")
-	}
-
-	adminIDPath := config.AdminIdentityPath(home)
-	if _, err := bundle.DecodeHostBundle(ct, agebox.FileIdentityProvider{Path: adminIDPath}); err != nil {
-		t.Fatalf("admin recovery decode failed: %v", err)
+	out := captureStdout(t, func() {
+		if err := runGet(context.Background(), a, &getFlags{stdout: true, noSync: true}, "ssh.main_private_key"); err != nil {
+			t.Fatalf("admin get: %v", err)
+		}
+	})
+	if string(out) != string(want) {
+		t.Fatalf("round-trip content mismatch")
 	}
 
-	vaultPath := filepath.Join(config.RepoDir(home), "admin", "vault.age")
-	vaultCT, err := os.ReadFile(vaultPath)
+	repoDir := config.RepoDir(home)
+	for _, needle := range []string{"ssh.main_private_key", "main_private_key", "KAUKETTESTFAKEKEYDATA"} {
+		if hits := scanForLiteral(t, repoDir, needle); len(hits) > 0 {
+			t.Fatalf("store checkout leaks %q: %v", needle, hits)
+		}
+	}
+}
+
+func TestAddNewSecretVisibleToGrantedClient(t *testing.T) {
+	adminApp, _, adminBase, clientApp, _, _, _ := v2StoreFixture(t)
+
+	keyPath := writeSSHKeyFixture(t)
+	want, err := os.ReadFile(keyPath)
 	if err != nil {
-		t.Fatalf("read vault ct: %v", err)
+		t.Fatalf("read fixture: %v", err)
 	}
-	if bytes.Contains(vaultCT, []byte("ssh.main_private_key")) {
-		t.Fatalf("vault ciphertext leaks secret id")
+	if err := runAdd(context.Background(), adminApp, &addFlags{}, "ssh.extra_private_key", keyPath); err != nil {
+		t.Fatalf("add extra key: %v", err)
 	}
-	if bytes.Contains(ct, []byte("ssh.main_private_key")) {
-		t.Fatalf("bundle ciphertext leaks secret id")
+
+	out := captureStdout(t, func() {
+		if err := runGet(context.Background(), clientApp, &getFlags{stdout: true}, "ssh.extra_private_key"); err != nil {
+			t.Fatalf("client get new secret in granted namespace: %v", err)
+		}
+	})
+	if string(out) != string(want) {
+		t.Fatalf("client content mismatch")
+	}
+
+	adminHome := config.RoleHome(adminBase, config.RoleAdmin)
+	if hits := scanForLiteral(t, config.RepoDir(adminHome), "extra_private_key"); len(hits) > 0 {
+		t.Fatalf("store checkout leaks secret id: %v", hits)
 	}
 }
 
@@ -248,7 +136,7 @@ func TestAddRejectsExistingWithoutForce(t *testing.T) {
 	if err := runAdd(context.Background(), a, &addFlags{force: true}, "ssh.main_private_key", keyPath); err != nil {
 		t.Fatalf("force add: %v", err)
 	}
-	if len(fake.Lines) != 2 || fake.Lines[0] != "updated ssh.main_private_key" {
+	if len(fake.Lines) != 1 || !strings.HasPrefix(fake.Lines[0], "updated ssh.main_private_key") {
 		t.Fatalf("expected updated line, got %v", fake.Lines)
 	}
 }

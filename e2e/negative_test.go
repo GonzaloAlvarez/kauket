@@ -24,7 +24,7 @@ func TestNegativeUnapprovedMachineCannotGetSecret(t *testing.T) {
 	mustMkdir(t, clientHome, 0o700)
 	remoteURL := setupBareRemote(t, bareDir)
 
-	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--yes")
+	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
 	if res.err != nil {
 		t.Fatalf("admin init: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -48,97 +48,13 @@ func TestNegativeUnapprovedMachineCannotGetSecret(t *testing.T) {
 	if code := exitCodeOf(res.err); code != 5 {
 		t.Fatalf("expected exit code 5 (ExitNotGranted), got %d; stderr:%s", code, res.stderr)
 	}
-	if !strings.Contains(res.stderr, "no approved bundle found for this machine") {
-		t.Fatalf("expected stderr to contain 'no approved bundle found for this machine', got: %q", res.stderr)
+	if !strings.Contains(res.stderr, "not granted access") {
+		t.Fatalf("expected stderr to contain 'not granted access', got: %q", res.stderr)
 	}
 
 	dest := filepath.Join(clientHome, ".ssh", "main_private_key")
 	if _, err := os.Stat(dest); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected no destination file, stat err: %v", err)
-	}
-}
-
-func TestNegativeWrongHostCannotDecryptBundle(t *testing.T) {
-	bin := buildBinary(t)
-
-	root := mustResolvedTempRoot(t)
-	adminHome := filepath.Join(root, "admin-home")
-	adminKauket := filepath.Join(adminHome, ".config", "kauket")
-	m2Home := filepath.Join(root, "machine2-home")
-	m2Kauket := filepath.Join(m2Home, ".config", "kauket")
-	m3Home := filepath.Join(root, "machine3-home")
-	m3Kauket := filepath.Join(m3Home, ".config", "kauket")
-	bareDir := filepath.Join(root, "bare-remote.git")
-
-	mustMkdir(t, adminHome, 0o700)
-	mustMkdir(t, m2Home, 0o700)
-	mustMkdir(t, m3Home, 0o700)
-	remoteURL := setupBareRemote(t, bareDir)
-
-	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--yes")
-	if res.err != nil {
-		t.Fatalf("admin init: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
-	}
-
-	adminKeyPath := filepath.Join(adminHome, ".ssh", "main_private_key.pem")
-	generateEd25519KeyFile(t, adminKeyPath)
-	res = runKauket(t, bin, adminKauket, adminHome, "add", "ssh.main_private_key", adminKeyPath)
-	if res.err != nil {
-		t.Fatalf("admin add: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
-	}
-
-	res = runKauket(t, bin, m2Kauket, m2Home, "enroll", "--remote", remoteURL, "--request", "ssh", "--name", "machine2", "--yes")
-	if res.err != nil {
-		t.Fatalf("enroll m2: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
-	}
-	res = runKauket(t, bin, adminKauket, adminHome, "approve", "--all", "--yes")
-	if res.err != nil {
-		t.Fatalf("approve m2: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
-	}
-
-	m2ID := readHostID(t, m2Kauket)
-	m2BundlePath := filepath.Join(roleHomePath(adminKauket, "admin"), "repo", "bundles", m2ID+".age")
-	m2Bundle, err := os.ReadFile(m2BundlePath)
-	if err != nil {
-		t.Fatalf("read m2 bundle from admin repo: %v", err)
-	}
-
-	res = runKauket(t, bin, m3Kauket, m3Home, "enroll", "--remote", remoteURL, "--request", "ssh", "--name", "machine3", "--yes")
-	if res.err != nil {
-		t.Fatalf("enroll m3: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
-	}
-
-	m3ID := readHostID(t, m3Kauket)
-	if m3ID == m2ID {
-		t.Fatalf("m2 and m3 host IDs collided unexpectedly: %s", m2ID)
-	}
-
-	res = runKauket(t, bin, m3Kauket, m3Home, "get", "ssh.main_private_key")
-	if res.err == nil {
-		t.Fatalf("first m3 get unexpectedly succeeded; stdout:%s stderr:%s", res.stdout, res.stderr)
-	}
-
-	m3BundleDir := filepath.Join(roleHomePath(m3Kauket, "client"), "repo", "bundles")
-	mustMkdir(t, m3BundleDir, 0o700)
-	m3BundlePath := filepath.Join(m3BundleDir, m3ID+".age")
-	if err := os.WriteFile(m3BundlePath, m2Bundle, 0o600); err != nil {
-		t.Fatalf("write m2 bundle to m3 path: %v", err)
-	}
-
-	res = runKauket(t, bin, m3Kauket, m3Home, "get", "ssh.main_private_key", "--no-sync")
-	if res.err == nil {
-		t.Fatalf("expected m3 get to fail; stdout:%s stderr:%s", res.stdout, res.stderr)
-	}
-	if code := exitCodeOf(res.err); code != 2 {
-		t.Fatalf("expected exit code 2 (ExitCrypto), got %d; stderr:%s", code, res.stderr)
-	}
-	if !strings.Contains(res.stderr, "failed to decrypt bundle") {
-		t.Fatalf("expected stderr to contain 'failed to decrypt bundle', got: %q", res.stderr)
-	}
-
-	dest := filepath.Join(m3Home, ".ssh", "main_private_key")
-	if _, err := os.Stat(dest); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("expected no destination file for m3, stat err: %v", err)
 	}
 }
 
@@ -156,7 +72,7 @@ func TestNegativeExistingUnmanagedFile(t *testing.T) {
 	mustMkdir(t, clientHome, 0o700)
 	remoteURL := setupBareRemote(t, bareDir)
 
-	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--yes")
+	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
 	if res.err != nil {
 		t.Fatalf("admin init: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -266,7 +182,7 @@ func TestNegativeSymlinkDestination(t *testing.T) {
 	mustMkdir(t, clientHome, 0o700)
 	remoteURL := setupBareRemote(t, bareDir)
 
-	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--yes")
+	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
 	if res.err != nil {
 		t.Fatalf("admin init: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -319,7 +235,7 @@ func TestNegativeSymlinkDestination(t *testing.T) {
 	}
 }
 
-func TestNegativeCorruptBundle(t *testing.T) {
+func TestNegativeCorruptObject(t *testing.T) {
 	bin := buildBinary(t)
 
 	root := mustResolvedTempRoot(t)
@@ -333,7 +249,7 @@ func TestNegativeCorruptBundle(t *testing.T) {
 	mustMkdir(t, clientHome, 0o700)
 	remoteURL := setupBareRemote(t, bareDir)
 
-	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--yes")
+	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
 	if res.err != nil {
 		t.Fatalf("admin init: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -354,8 +270,6 @@ func TestNegativeCorruptBundle(t *testing.T) {
 		t.Fatalf("approve: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
 
-	hostID := readHostID(t, clientKauket)
-
 	res = runKauket(t, bin, clientKauket, clientHome, "get", "ssh.main_private_key")
 	if res.err != nil {
 		t.Fatalf("initial get to populate client repo failed: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
@@ -371,31 +285,45 @@ func TestNegativeCorruptBundle(t *testing.T) {
 		t.Fatalf("remove installed state: %v", err)
 	}
 
-	bundlePath := filepath.Join(clientRoleHome, "repo", "bundles", hostID+".age")
-	bundleBytes, err := os.ReadFile(bundlePath)
+	objectsDir := filepath.Join(clientRoleHome, "repo", "objects")
+	entries, err := os.ReadDir(objectsDir)
 	if err != nil {
-		t.Fatalf("read client bundle: %v", err)
+		t.Fatalf("read objects dir: %v", err)
 	}
-	if len(bundleBytes) < 200 {
-		t.Fatalf("client bundle suspiciously short (%d bytes)", len(bundleBytes))
+	corrupted := false
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), "o_") {
+			continue
+		}
+		objPath := filepath.Join(objectsDir, e.Name())
+		objBytes, err := os.ReadFile(objPath)
+		if err != nil {
+			t.Fatalf("read object: %v", err)
+		}
+		if len(objBytes) < 200 {
+			t.Fatalf("object suspiciously short (%d bytes)", len(objBytes))
+		}
+		objBytes[len(objBytes)-50] ^= 0xFF
+		if err := os.WriteFile(objPath, objBytes, 0o600); err != nil {
+			t.Fatalf("write corrupt object: %v", err)
+		}
+		corrupted = true
 	}
-	flipAt := len(bundleBytes) - 50
-	bundleBytes[flipAt] ^= 0xFF
-	if err := os.WriteFile(bundlePath, bundleBytes, 0o600); err != nil {
-		t.Fatalf("write corrupt bundle: %v", err)
+	if !corrupted {
+		t.Fatalf("no secret object found to corrupt; entries: %v", entries)
 	}
 
 	res = runKauket(t, bin, clientKauket, clientHome, "get", "ssh.main_private_key", "--no-sync")
 	if res.err == nil {
-		t.Fatalf("expected get on corrupt bundle to fail; stdout:%s stderr:%s", res.stdout, res.stderr)
+		t.Fatalf("expected get on corrupt object to fail; stdout:%s stderr:%s", res.stdout, res.stderr)
 	}
 	if code := exitCodeOf(res.err); code != 2 {
 		t.Fatalf("expected exit code 2 (ExitCrypto), got %d; stderr:%s", code, res.stderr)
 	}
-	if !strings.Contains(res.stderr, "failed to decrypt") {
-		t.Fatalf("expected stderr to contain 'failed to decrypt', got: %q", res.stderr)
+	if !strings.Contains(res.stderr, "decrypt") {
+		t.Fatalf("expected stderr to mention decrypt failure, got: %q", res.stderr)
 	}
-	t.Logf("corrupt bundle stderr: %q", strings.TrimSpace(res.stderr))
+	t.Logf("corrupt object stderr: %q", strings.TrimSpace(res.stderr))
 
 	if _, err := os.Stat(dest); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected destination not installed, stat err: %v", err)

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
+	"filippo.io/age"
 	"os"
 	"path/filepath"
 	"testing"
@@ -251,4 +252,22 @@ func TestEd25519SignerProducesVerifiableSignature(t *testing.T) {
 	if err := (Ed25519Verifier{}).Verify([]byte("different"), sig, pubAuthorized); err == nil {
 		t.Fatalf("expected verify of different payload to fail")
 	}
+}
+
+func generateIdentity(t *testing.T) *age.X25519Identity {
+	t.Helper()
+	id, err := agebox.GenerateIdentity()
+	if err != nil {
+		t.Fatalf("generate identity: %v", err)
+	}
+	return id
+}
+
+func writeIdentityFile(t *testing.T, name string, id *age.X25519Identity) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, []byte(id.String()+"\n"), 0o600); err != nil {
+		t.Fatalf("write identity %q: %v", name, err)
+	}
+	return path
 }

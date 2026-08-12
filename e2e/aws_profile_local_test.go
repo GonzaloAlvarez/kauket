@@ -64,7 +64,7 @@ func TestAWSProfileLocalE2E(t *testing.T) {
 		t.Fatalf("write client aws credentials: %v", err)
 	}
 
-	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--yes")
+	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
 	if res.err != nil {
 		t.Fatalf("init: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -84,7 +84,7 @@ func TestAWSProfileLocalE2E(t *testing.T) {
 		}
 	}
 
-	res = runKauket(t, bin, clientKauket, clientHome, "enroll", "--remote", remoteURL, "--request", "aws", "--name", "machine2", "--yes")
+	res = runKauket(t, bin, clientKauket, clientHome, "enroll", "--remote", remoteURL, "--request", "aws/profile", "--name", "machine2", "--yes")
 	if res.err != nil {
 		t.Fatalf("enroll: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}

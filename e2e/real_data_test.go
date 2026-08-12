@@ -31,7 +31,7 @@ func TestRealDataSshEd25519PrivateKey(t *testing.T) {
 	mustMkdir(t, clientHome, 0o700)
 	remoteURL := setupBareRemote(t, bareDir)
 
-	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--yes")
+	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
 	if res.err != nil {
 		t.Fatalf("admin init: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -106,7 +106,7 @@ func TestRealDataAwsCredentialsFile(t *testing.T) {
 	mustMkdir(t, clientHome, 0o700)
 	remoteURL := setupBareRemote(t, bareDir)
 
-	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--yes")
+	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
 	if res.err != nil {
 		t.Fatalf("admin init: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -117,12 +117,12 @@ func TestRealDataAwsCredentialsFile(t *testing.T) {
 		t.Fatalf("write aws creds source: %v", err)
 	}
 
-	res = runKauket(t, bin, adminKauket, adminHome, "add", "aws.primary_account.key_file", awsSrc, "--dest", "~/.aws/credentials", "--profile", "aws")
+	res = runKauket(t, bin, adminKauket, adminHome, "add", "aws.primary_account.key_file", awsSrc, "--dest", "~/.aws/credentials")
 	if res.err != nil {
 		t.Fatalf("admin add aws: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
 
-	res = runKauket(t, bin, clientKauket, clientHome, "enroll", "--remote", remoteURL, "--request", "aws", "--name", "machine2", "--yes")
+	res = runKauket(t, bin, clientKauket, clientHome, "enroll", "--remote", remoteURL, "--request", "aws/primary_account", "--name", "machine2", "--yes")
 	if res.err != nil {
 		t.Fatalf("enroll: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -170,7 +170,7 @@ func TestRealDataBinaryFile(t *testing.T) {
 	mustMkdir(t, clientHome, 0o700)
 	remoteURL := setupBareRemote(t, bareDir)
 
-	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--yes")
+	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
 	if res.err != nil {
 		t.Fatalf("admin init: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -184,12 +184,12 @@ func TestRealDataBinaryFile(t *testing.T) {
 		t.Fatalf("write blob: %v", err)
 	}
 
-	res = runKauket(t, bin, adminKauket, adminHome, "add", "binary.test_blob", blobPath, "--dest", "~/.local/share/test_blob", "--profile", "test")
+	res = runKauket(t, bin, adminKauket, adminHome, "add", "binary.test_blob", blobPath, "--dest", "~/.local/share/test_blob")
 	if res.err != nil {
 		t.Fatalf("admin add binary: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
 
-	res = runKauket(t, bin, clientKauket, clientHome, "enroll", "--remote", remoteURL, "--request", "test", "--name", "machine2", "--yes")
+	res = runKauket(t, bin, clientKauket, clientHome, "enroll", "--remote", remoteURL, "--request", "binary", "--name", "machine2", "--yes")
 	if res.err != nil {
 		t.Fatalf("enroll: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}

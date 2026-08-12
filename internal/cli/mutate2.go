@@ -55,7 +55,7 @@ func runV2Mutation(ctx context.Context, a *app.App, home string, cfg *config.Adm
 
 func runV2MutationWithPost(ctx context.Context, a *app.App, home string, cfg *config.Admin, buildIntent func(repoDir string) (manifest.Intent, error), postApply func(repoDir, signKeyPath string, vctx *v2Context) error) (*manifest.Plan, error) {
 	if cfg.V2 == nil || cfg.V2.SignKeyPath == "" {
-		return nil, &ExitError{Code: ExitUsage, Err: errors.New("kauket: this home has no v2 signing identity; run 'kauket migrate-store' or 'kauket init --v2' first")}
+		return nil, &ExitError{Code: ExitUsage, Err: errors.New("kauket: this home has no v2 signing identity; run 'kauket init' first (legacy v1 stores: migrate with the kauket v2.0.x release)")}
 	}
 	remoteURL := cfg.Repo.RemoteHTTPS
 	transport, err := buildAdminSyncTransport(ctx, a, remoteURL, cfg.Repo.Owner)
@@ -96,7 +96,7 @@ func runV2MutationWithPost(ctx context.Context, a *app.App, home string, cfg *co
 		}
 		repoDir := config.RepoDir(home)
 		if !isV2Store(repoDir) {
-			return nil, &ExitError{Code: ExitUsage, Err: errors.New("kauket: this operation requires a v2 store; run 'kauket migrate-store' first")}
+			return nil, &ExitError{Code: ExitUsage, Err: errors.New("kauket: this operation requires a v2 store; migrate legacy v1 stores with the kauket v2.0.x release ('kauket migrate-store')")}
 		}
 		vctx, err := loadV2Context(home, cfg.Admin.IdentityPath, cfg.V2)
 		if err != nil {
