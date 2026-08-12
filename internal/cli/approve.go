@@ -11,7 +11,6 @@ import (
 	"github.com/gonzaloalvarez/kauket/internal/config"
 	"github.com/gonzaloalvarez/kauket/internal/githubauth"
 	"github.com/gonzaloalvarez/kauket/internal/gitstore"
-	"github.com/gonzaloalvarez/kauket/internal/model"
 	"github.com/spf13/cobra"
 )
 
@@ -36,11 +35,6 @@ func NewApprove(a *app.App) *cobra.Command {
 	cmd.Flags().BoolVar(&f.yes, "yes", false, "noninteractive")
 	cmd.Flags().BoolVar(&f.dryRun, "dry-run", false, "show actions only")
 	return cmd
-}
-
-type validRequest struct {
-	req    model.Request
-	branch string
 }
 
 func runApprove(ctx context.Context, a *app.App, f *approveFlags) error {
