@@ -67,20 +67,21 @@ func TestDualRoleStatusShowsBothSections(t *testing.T) {
 	if err := runStatus(a, ""); err != nil {
 		t.Fatalf("status: %v", err)
 	}
-	if len(fake.Lines) != 11 {
-		t.Fatalf("expected 11 lines (5 admin + blank + 5 client), got %d: %v", len(fake.Lines), fake.Lines)
+	lines := statusLinesWithoutFingerprint(fake.Lines)
+	if len(lines) != 11 {
+		t.Fatalf("expected 11 lines (5 admin + blank + 5 client), got %d: %v", len(lines), fake.Lines)
 	}
-	if fake.Lines[0] != "role: admin" {
-		t.Fatalf("line 0: %q", fake.Lines[0])
+	if lines[0] != "role: admin" {
+		t.Fatalf("line 0: %q", lines[0])
 	}
-	if fake.Lines[2] != "schema: 2" {
-		t.Fatalf("line 2: %q", fake.Lines[2])
+	if lines[2] != "schema: 3 (sealed)" {
+		t.Fatalf("line 2: %q", lines[2])
 	}
-	if fake.Lines[5] != "" {
-		t.Fatalf("line 5 should be blank separator, got %q", fake.Lines[5])
+	if lines[5] != "" {
+		t.Fatalf("line 5 should be blank separator, got %q", lines[5])
 	}
-	if fake.Lines[6] != "role: client" {
-		t.Fatalf("line 6: %q", fake.Lines[6])
+	if lines[6] != "role: client" {
+		t.Fatalf("line 6: %q", lines[6])
 	}
 }
 

@@ -10,22 +10,26 @@ import (
 	"sort"
 
 	"github.com/gonzaloalvarez/kauket/internal/app"
+	"github.com/gonzaloalvarez/kauket/internal/awsconfig"
 	"github.com/gonzaloalvarez/kauket/internal/bundle"
 	"github.com/gonzaloalvarez/kauket/internal/config"
+	"github.com/gonzaloalvarez/kauket/internal/install"
 	"github.com/gonzaloalvarez/kauket/internal/manifest"
 	"github.com/spf13/cobra"
 )
 
 func NewVerify(a *app.App) *cobra.Command {
 	var noSync bool
+	var installs bool
 	cmd := &cobra.Command{
 		Use:   "verify",
 		Short: "Audit the v2 store: signature chain, hashes, version pins",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runVerify(cmd.Context(), a, noSync)
+			return runVerify(cmd.Context(), a, noSync, installs)
 		},
 	}
 	cmd.Flags().BoolVar(&noSync, "no-sync", false, "do not sync first")
+	cmd.Flags().BoolVar(&installs, "installs", false, "pre-flight every readable secret's install target against client install policy")
 	return cmd
 }
 
@@ -55,7 +59,7 @@ func resolveV2ReadIdentity(a *app.App) (home, identityPath string, v2 *config.V2
 	return "", "", nil, "", errors.New("kauket: no kauket store configured here; run 'kauket init' or 'kauket enroll' first")
 }
 
-func runVerify(ctx context.Context, a *app.App, noSync bool) error {
+func runVerify(ctx context.Context, a *app.App, noSync, installs bool) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -89,7 +93,90 @@ func runVerify(ctx context.Context, a *app.App, noSync bool) error {
 		return &ExitError{Code: ExitUsage, Err: err}
 	}
 	a.UI.Println(fmt.Sprintf("verified %d nodes, %d entries", nodes, entries))
+	if installs {
+		problems, err := preflightInstalls(vctx, home)
+		if err != nil {
+			return translateV2ReadError(err)
+		}
+		if len(problems) == 0 {
+			a.UI.Println("install pre-flight: all readable secrets install within policy")
+		} else {
+			for _, p := range problems {
+				a.UI.Println("install pre-flight: " + p)
+			}
+			return &ExitError{Code: ExitInstall, Err: fmt.Errorf("kauket: %d secret(s) would be rejected on install", len(problems))}
+		}
+	}
 	return nil
+}
+
+func preflightInstalls(vctx *v2Context, home string) ([]string, error) {
+	dir := objectsDir(vctx.repoDir)
+	nodes, err := manifest.LoadReadableTree(dir, vctx.root, vctx.pins, vctx.identity, bundle.Ed25519Verifier{})
+	if err != nil {
+		return nil, err
+	}
+	var opts install.Options
+	applyInstallPolicy(&opts, home)
+	nodeIDs := make([]string, 0, len(nodes))
+	for id := range nodes {
+		nodeIDs = append(nodeIDs, id)
+	}
+	sort.Strings(nodeIDs)
+	var problems []string
+	for _, id := range nodeIDs {
+		body := nodes[id].Body
+		if body.IndexObjectID == "" {
+			continue
+		}
+		ix, err := manifest.LoadIndex(dir, body, vctx.identity)
+		if err != nil {
+			if isNoIdentityMatch(err) {
+				continue
+			}
+			return nil, err
+		}
+		names := make([]string, 0, len(ix.Entries))
+		for name := range ix.Entries {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			obj, err := manifest.LoadObject(dir, ix.Entries[name], vctx.identity)
+			if err != nil {
+				if isNoIdentityMatch(err) {
+					continue
+				}
+				return nil, err
+			}
+			switch obj.Kind {
+			case "", "file":
+				spec, terr := translateInstallSpec(obj.Install)
+				if terr != nil {
+					problems = append(problems, fmt.Sprintf("%s: %v", name, terr))
+					continue
+				}
+				if perr := install.PreflightInstall(spec, opts); perr != nil {
+					problems = append(problems, fmt.Sprintf("%s -> %s: %v", name, obj.Install.Destination, perr))
+				}
+			case "aws_profile":
+				content, derr := base64.StdEncoding.DecodeString(obj.ContentBase64)
+				if derr != nil {
+					problems = append(problems, fmt.Sprintf("%s: %v", name, derr))
+					continue
+				}
+				env, perr := awsconfig.ParseEnvelope(content)
+				if perr != nil {
+					problems = append(problems, fmt.Sprintf("%s: %v", name, perr))
+					continue
+				}
+				if verr := awsconfig.ValidateEnvelope(env, opts.DeniedAWSKeys); verr != nil {
+					problems = append(problems, fmt.Sprintf("%s: %v", name, verr))
+				}
+			}
+		}
+	}
+	return problems, nil
 }
 
 func verifyReadableStore(vctx *v2Context) (int, int, error) {

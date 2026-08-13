@@ -15,6 +15,7 @@ import (
 	"github.com/gonzaloalvarez/kauket/internal/config"
 	"github.com/gonzaloalvarez/kauket/internal/gitstore"
 	"github.com/gonzaloalvarez/kauket/internal/manifest"
+	"github.com/gonzaloalvarez/kauket/internal/model"
 )
 
 const maxMutationRetries = 5
@@ -35,6 +36,9 @@ func splitNodePath(arg string) []string {
 }
 
 func loadRepoIdentity(repoDir, id string) (manifest.IdentityRecord, error) {
+	if err := model.ValidateIdentityID(id); err != nil {
+		return manifest.IdentityRecord{}, fmt.Errorf("kauket: %w", err)
+	}
 	data, err := os.ReadFile(filepath.Join(repoIdentitiesDir(repoDir), id+".json"))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {

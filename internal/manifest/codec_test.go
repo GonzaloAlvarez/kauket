@@ -139,9 +139,12 @@ func TestStoreRootSignVerifyRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SignStoreRoot: %v", err)
 	}
-	root, err := VerifyStoreRoot(doc, sig, []string{signPub}, bundle.Ed25519Verifier{})
+	root, matched, err := VerifyStoreRoot(doc, sig, []string{signPub}, bundle.Ed25519Verifier{})
 	if err != nil {
 		t.Fatalf("VerifyStoreRoot: %v", err)
+	}
+	if matched != signPub {
+		t.Fatalf("matched key = %q, want %q", matched, signPub)
 	}
 	if root.StoreID != "ks_fixturestore1234" || root.RootNodeID != "n_fixtureroot123456" {
 		t.Fatalf("root = %+v", root)
@@ -155,11 +158,11 @@ func TestVerifyStoreRootTampered(t *testing.T) {
 		t.Fatalf("SignStoreRoot: %v", err)
 	}
 	tampered := []byte(strings.Replace(string(doc), "GonzaloAlvarez", "attacker", 1))
-	if _, err := VerifyStoreRoot(tampered, sig, []string{signPub}, bundle.Ed25519Verifier{}); !errors.Is(err, ErrUntrustedSigner) {
+	if _, _, err := VerifyStoreRoot(tampered, sig, []string{signPub}, bundle.Ed25519Verifier{}); !errors.Is(err, ErrUntrustedSigner) {
 		t.Fatalf("tampered doc: err = %v, want ErrUntrustedSigner", err)
 	}
 	_, otherPub := newTestSigner(t)
-	if _, err := VerifyStoreRoot(doc, sig, []string{otherPub}, bundle.Ed25519Verifier{}); !errors.Is(err, ErrUntrustedSigner) {
+	if _, _, err := VerifyStoreRoot(doc, sig, []string{otherPub}, bundle.Ed25519Verifier{}); !errors.Is(err, ErrUntrustedSigner) {
 		t.Fatalf("unpinned signer: err = %v, want ErrUntrustedSigner", err)
 	}
 }

@@ -4,6 +4,7 @@ import "github.com/gonzaloalvarez/kauket/internal/model"
 
 const (
 	Schema            = 2
+	SchemaSealed      = 3
 	KindManifest      = "manifest"
 	KindIndex         = "index"
 	KindRoutedRequest = "routed_request"
@@ -13,6 +14,10 @@ const (
 	FormatObject        = "kauket-object-v2"
 	FormatRoutedRequest = "kauket-routed-request-v2"
 )
+
+func schemaSupported(s int) bool {
+	return s == Schema || s == SchemaSealed
+}
 
 type Signature = model.RequestSignature
 
@@ -29,6 +34,7 @@ type Owner struct {
 
 type ChildAttestation struct {
 	NodeID        string   `json:"node_id"`
+	Name          string   `json:"name,omitempty"`
 	OwnerSignKeys []string `json:"owner_sign_keys"`
 }
 
@@ -124,6 +130,7 @@ type RecoveryKey struct {
 
 type StoreRoot struct {
 	Schema       int           `json:"schema"`
+	Version      int           `json:"version,omitempty"`
 	StoreID      string        `json:"store_id"`
 	CreatedAt    string        `json:"created_at"`
 	Format       StoreFormat   `json:"format"`
@@ -132,6 +139,10 @@ type StoreRoot struct {
 	TrustAnchors []TrustAnchor `json:"trust_anchors"`
 	Recovery     []RecoveryKey `json:"recovery"`
 	FrozenV1     bool          `json:"frozen_v1"`
+}
+
+func (r StoreRoot) Sealed() bool {
+	return r.Schema >= SchemaSealed
 }
 
 type IdentityRecord struct {

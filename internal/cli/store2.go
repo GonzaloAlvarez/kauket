@@ -15,6 +15,7 @@ import (
 	"github.com/gonzaloalvarez/kauket/internal/bundle"
 	"github.com/gonzaloalvarez/kauket/internal/config"
 	"github.com/gonzaloalvarez/kauket/internal/manifest"
+	"github.com/gonzaloalvarez/kauket/internal/model"
 	cryptossh "golang.org/x/crypto/ssh"
 )
 
@@ -106,23 +107,32 @@ func loadV2Context(home, identityPath string, v2 *config.V2Local) (*v2Context, e
 		for _, r := range root.Recovery {
 			selfKeys = append(selfKeys, r.SignPubkey)
 		}
-		root, err = manifest.VerifyStoreRoot(doc, sig, selfKeys, bundle.Ed25519Verifier{})
+		root, _, err = manifest.VerifyStoreRoot(doc, sig, selfKeys, bundle.Ed25519Verifier{})
 		if err != nil {
 			return nil, err
 		}
 		pins.StoreID = root.StoreID
+		pins.StoreVersion = root.Version
 		pins.TrustAnchors = root.TrustAnchors
 		for _, r := range root.Recovery {
 			pins.RecoverySignPubkeys = append(pins.RecoverySignPubkeys, r.SignPubkey)
 		}
 	} else {
-		root, err = manifest.VerifyStoreRoot(doc, sig, pins.PinnedSignKeys(), bundle.Ed25519Verifier{})
+		var matchedKey string
+		root, matchedKey, err = manifest.VerifyStoreRoot(doc, sig, pins.PinnedSignKeys(), bundle.Ed25519Verifier{})
 		if err != nil {
 			return nil, err
 		}
 		if pins.StoreID != "" && pins.StoreID != root.StoreID {
 			return nil, fmt.Errorf("%w: pinned %s, store.json has %s", manifest.ErrStoreIDMismatch, pins.StoreID, root.StoreID)
 		}
+		if root.Version < pins.StoreVersion {
+			return nil, fmt.Errorf("%w: store.json version %d < pinned %d", manifest.ErrStoreRollback, root.Version, pins.StoreVersion)
+		}
+		if !recoverySetEqual(pins.RecoverySignPubkeys, root.Recovery) && !containsString(pins.RecoverySignPubkeys, matchedKey) {
+			return nil, manifest.ErrRecoveryAuthority
+		}
+		pins.StoreVersion = root.Version
 		pins.TrustAnchors = root.TrustAnchors
 		pins.RecoverySignPubkeys = nil
 		for _, r := range root.Recovery {
@@ -222,12 +232,36 @@ func writeRecoveryPair(outDir string) (ageRecipient, signPub string, err error) 
 }
 
 func writeIdentityRecord(repoDir string, rec manifest.IdentityRecord) error {
+	if err := model.ValidateIdentityID(rec.ID); err != nil {
+		return fmt.Errorf("kauket: %w", err)
+	}
 	data, err := json.MarshalIndent(rec, "", "  ")
 	if err != nil {
 		return fmt.Errorf("kauket: marshal identity record: %w", err)
 	}
 	data = append(data, '\n')
 	return writeRepoFile(filepath.Join(repoIdentitiesDir(repoDir), rec.ID+".json"), data)
+}
+
+func containsString(ss []string, s string) bool {
+	for _, x := range ss {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+func recoverySetEqual(pinned []string, cur []manifest.RecoveryKey) bool {
+	if len(pinned) != len(cur) {
+		return false
+	}
+	for _, r := range cur {
+		if !containsString(pinned, r.SignPubkey) {
+			return false
+		}
+	}
+	return true
 }
 
 func rewriteStoreRoot(repoDir, signKeyPath string, mutate func(*manifest.StoreRoot) error) error {
@@ -241,6 +275,9 @@ func rewriteStoreRoot(repoDir, signKeyPath string, mutate func(*manifest.StoreRo
 	}
 	if err := mutate(&root); err != nil {
 		return err
+	}
+	if root.Sealed() {
+		root.Version++
 	}
 	newDoc, newSig, err := manifest.SignStoreRoot(root, bundle.Ed25519FileSigner{Path: signKeyPath})
 	if err != nil {

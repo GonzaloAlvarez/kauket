@@ -29,6 +29,7 @@ func NewRoot(a *app.App) *cobra.Command {
 		NewJoin(a),
 		NewRescue(a),
 		NewInspect(a),
+		NewReseal(a),
 	)
 	return root
 }

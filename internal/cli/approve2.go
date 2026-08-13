@@ -36,8 +36,9 @@ func runApproveV2(ctx context.Context, a *app.App, home string, cfg *config.Admi
 	sort.Slice(refs, func(i, j int) bool { return refs[i].RequestID < refs[j].RequestID })
 
 	type v2Request struct {
-		req    model.Request
-		branch string
+		req       model.Request
+		branch    string
+		requestID string
 	}
 	var valid []v2Request
 	for _, ref := range refs {
@@ -54,11 +55,19 @@ func runApproveV2(ctx context.Context, a *app.App, home string, cfg *config.Admi
 			a.UI.Errorf("request %s: store_id mismatch; skipping", ref.Branch)
 			continue
 		}
+		if err := model.ValidateIdentityID(req.Host.ID); err != nil {
+			a.UI.Errorf("request %s: invalid host id; skipping", ref.Branch)
+			continue
+		}
+		if err := model.ValidateRequestID(req.RequestID); err != nil || req.RequestID != ref.RequestID {
+			a.UI.Errorf("request %s: request id does not match its branch; skipping", ref.Branch)
+			continue
+		}
 		if len(req.Requested.Paths) == 0 {
 			a.UI.Errorf("request %s: no requested paths (v1-style request against a v2 store); skipping", ref.Branch)
 			continue
 		}
-		valid = append(valid, v2Request{req: req, branch: ref.Branch})
+		valid = append(valid, v2Request{req: req, branch: ref.Branch, requestID: ref.RequestID})
 	}
 	if f.request != "" {
 		filtered := valid[:0]
@@ -133,11 +142,16 @@ func runApproveV2(ctx context.Context, a *app.App, home string, cfg *config.Admi
 			a.UI.Println(fmt.Sprintf("request %d approved (dry-run)", idx+1))
 			continue
 		}
-		if err := approveOneV2(ctx, a, engine, repoDir, vctx, v.req, cfg, useGitHub, token, now); err != nil {
+		interactive := !f.all && !f.yes
+		if err := approveOneV2(ctx, a, engine, repoDir, vctx, v.req, cfg, useGitHub, token, now, interactive, f.enrollUnknown || f.yes); err != nil {
+			if errors.Is(err, errEnrollSkipped) {
+				a.UI.Println(fmt.Sprintf("request %d: new identity %s needs confirmation or --enroll-unknown; left pending", idx+1, v.req.Host.ID))
+				continue
+			}
 			a.UI.Errorf("request %d: %v", idx+1, err)
 			continue
 		}
-		approvedBranches = append(approvedBranches, v.req.RequestID)
+		approvedBranches = append(approvedBranches, v.requestID)
 		a.UI.Println(fmt.Sprintf("request %d approved", idx+1))
 	}
 	if len(approvedBranches) == 0 {
@@ -162,10 +176,18 @@ func runApproveV2(ctx context.Context, a *app.App, home string, cfg *config.Admi
 	return nil
 }
 
-func approveOneV2(ctx context.Context, a *app.App, engine *manifest.Engine, repoDir string, vctx *v2Context, req model.Request, cfg *config.Admin, useGitHub bool, token string, now func() time.Time) error {
+var errEnrollSkipped = errors.New("kauket: enrollment of a new identity was not confirmed")
+
+func approveOneV2(ctx context.Context, a *app.App, engine *manifest.Engine, repoDir string, vctx *v2Context, req model.Request, cfg *config.Admin, useGitHub bool, token string, now func() time.Time, interactive, enrollUnknown bool) error {
+	if err := model.ValidateIdentityID(req.Host.ID); err != nil {
+		return fmt.Errorf("refusing request with invalid host id: %w", err)
+	}
 	rec, err := loadRepoIdentity(repoDir, req.Host.ID)
 	known := err == nil
 	if !known {
+		if !interactive && !enrollUnknown {
+			return errEnrollSkipped
+		}
 		rec = manifest.IdentityRecord{
 			Schema:           manifest.Schema,
 			ID:               req.Host.ID,
@@ -186,6 +208,8 @@ func approveOneV2(ctx context.Context, a *app.App, engine *manifest.Engine, repo
 		}
 	} else if rec.AgeRecipient != req.Host.AgeRecipient {
 		return fmt.Errorf("identity %s already bound to a different recipient; refusing", req.Host.ID)
+	} else if rec.SSHEd25519Pubkey != req.Host.GitDeployPublicKey {
+		return fmt.Errorf("identity %s is bound to a different signing key; refusing", req.Host.ID)
 	}
 
 	for _, p := range req.Requested.Paths {

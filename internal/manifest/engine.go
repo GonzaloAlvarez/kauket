@@ -27,6 +27,7 @@ type Intent struct {
 	Secret   *Object
 	Force    bool
 	AsOwner  bool
+	Subtree  bool
 }
 
 type Plan struct {
@@ -153,7 +154,7 @@ func (e *Engine) applyAdd(state *engineState, in Intent) (*Plan, error) {
 	for _, segment := range remaining {
 		parent := state.tree[attachID]
 		child := ManifestBody{
-			Schema: Schema, Kind: KindManifest, StoreID: e.Root.StoreID,
+			Schema: e.Root.Schema, Kind: KindManifest, StoreID: e.Root.StoreID,
 			NodeID: model.NewNodeID(), Version: 1, UpdatedAt: e.nowStr(),
 			Name: segment, ParentID: attachID,
 			Owners:        parent.Owners,
@@ -164,7 +165,11 @@ func (e *Engine) applyAdd(state *engineState, in Intent) (*Plan, error) {
 		for _, o := range child.Owners {
 			ownerKeys = append(ownerKeys, o.SignPubkey)
 		}
-		parent.Children = append(parent.Children, ChildAttestation{NodeID: child.NodeID, OwnerSignKeys: ownerKeys})
+		att := ChildAttestation{NodeID: child.NodeID, OwnerSignKeys: ownerKeys}
+		if e.Root.Sealed() {
+			att.Name = segment
+		}
+		parent.Children = append(parent.Children, att)
 		parent.Version++
 		parent.UpdatedAt = e.nowStr()
 		state.tree[attachID] = parent
@@ -172,7 +177,7 @@ func (e *Engine) applyAdd(state *engineState, in Intent) (*Plan, error) {
 
 		state.tree[child.NodeID] = child
 		state.files[child.NodeID] = ManifestFile{Body: child}
-		emptyIx := Index{Schema: Schema, Kind: KindIndex, StoreID: e.Root.StoreID, NodeID: child.NodeID, Entries: map[string]IndexEntry{}}
+		emptyIx := Index{Schema: e.Root.Schema, Kind: KindIndex, StoreID: e.Root.StoreID, NodeID: child.NodeID, Entries: map[string]IndexEntry{}}
 		if err := e.writeIndex(state, child.NodeID, emptyIx, plan); err != nil {
 			return nil, err
 		}
@@ -191,7 +196,7 @@ func (e *Engine) applyAdd(state *engineState, in Intent) (*Plan, error) {
 	}
 
 	obj := *in.Secret
-	obj.Schema = Schema
+	obj.Schema = e.Root.Schema
 	obj.StoreID = e.Root.StoreID
 	obj.ObjectID = model.NewObjectID()
 	obj.UpdatedAt = e.nowStr()
@@ -278,11 +283,14 @@ func (e *Engine) applyGrant(state *engineState, in Intent) (*Plan, error) {
 			body.ExtraReaders = append(body.ExtraReaders, member)
 		}
 	} else {
-		if hasMember(body.Readers, member.IID) || ownerHas(body.Owners, member.IID) {
+		already := hasMember(body.Readers, member.IID) || ownerHas(body.Owners, member.IID)
+		if already && !in.Subtree {
 			plan.NoOp = true
 			return plan, nil
 		}
-		body.Readers = append(body.Readers, member)
+		if !already {
+			body.Readers = append(body.Readers, member)
+		}
 	}
 	body.Version++
 	body.UpdatedAt = e.nowStr()
@@ -291,7 +299,13 @@ func (e *Engine) applyGrant(state *engineState, in Intent) (*Plan, error) {
 	if err := e.reencodeNodeContent(state, nodeID, ix, plan, in.Key); err != nil {
 		return nil, err
 	}
-	if err := e.resignAndWrite(state, map[string]bool{nodeID: true}, plan); err != nil {
+	resigned := map[string]bool{nodeID: true}
+	if in.Key == "" && in.Subtree {
+		if err := e.grantSubtreeReader(state, nodeID, member, plan, resigned); err != nil {
+			return nil, err
+		}
+	}
+	if err := e.resignAndWrite(state, resigned, plan); err != nil {
 		return nil, err
 	}
 	if err := e.widenAncestors(state, nodeID, member.AgeRecipient, plan); err != nil {
@@ -337,6 +351,9 @@ func (e *Engine) applyGrantOwner(state *engineState, in Intent, nodeID string, i
 	}
 
 	if err := e.reencodeNodeContent(state, nodeID, ix, plan, ""); err != nil {
+		return nil, err
+	}
+	if err := e.grantSubtreeReader(state, nodeID, Member{IID: newOwner.IID, AgeRecipient: newOwner.AgeRecipient}, plan, resigned); err != nil {
 		return nil, err
 	}
 	if err := e.resignAndWrite(state, resigned, plan); err != nil {
@@ -430,19 +447,27 @@ func (e *Engine) applyRevoke(state *engineState, in Intent) (*Plan, error) {
 			}
 		}
 	}
+	resigned := map[string]bool{nodeID: true}
+	if in.Key == "" && in.Subtree {
+		subAny, err := e.revokeSubtreeReader(state, nodeID, in.Identity.ID, plan, resigned)
+		if err != nil {
+			return nil, err
+		}
+		removed = removed || subAny
+	}
 	if !removed {
 		plan.NoOp = true
 		return plan, nil
 	}
-	sort.Strings(plan.Rotation)
 	body.Version++
 	body.UpdatedAt = e.nowStr()
 	state.tree[nodeID] = body
+	sort.Strings(plan.Rotation)
 
 	if err := e.reencodeNodeContent(state, nodeID, ix, plan, ""); err != nil {
 		return nil, err
 	}
-	if err := e.resignAndWrite(state, map[string]bool{nodeID: true}, plan); err != nil {
+	if err := e.resignAndWrite(state, resigned, plan); err != nil {
 		return nil, err
 	}
 	if err := e.shrinkAncestors(state, nodeID, plan); err != nil {
@@ -513,6 +538,9 @@ func (e *Engine) applyRevokeOwner(state *engineState, in Intent, nodeID string, 
 		}
 	}
 
+	if _, err := e.revokeSubtreeReader(state, nodeID, in.Identity.ID, plan, resigned); err != nil {
+		return nil, err
+	}
 	if err := e.reencodeNodeContent(state, nodeID, ix, plan, ""); err != nil {
 		return nil, err
 	}
@@ -525,6 +553,7 @@ func (e *Engine) applyRevokeOwner(state *engineState, in Intent, nodeID string, 
 	if err := e.shrinkSubtree(state, nodeID, plan); err != nil {
 		return nil, err
 	}
+	sort.Strings(plan.Rotation)
 	return plan, nil
 }
 
@@ -552,6 +581,76 @@ func (e *Engine) shrinkSubtree(state *engineState, nodeID string, plan *Plan) er
 		}
 	}
 	return nil
+}
+
+func (e *Engine) grantSubtreeReader(state *engineState, nodeID string, member Member, plan *Plan, resigned map[string]bool) error {
+	for _, child := range state.tree[nodeID].Children {
+		cb := state.tree[child.NodeID]
+		if !hasMember(cb.Readers, member.IID) && !ownerHas(cb.Owners, member.IID) {
+			cb.Readers = append(cb.Readers, member)
+			cb.Version++
+			cb.UpdatedAt = e.nowStr()
+			state.tree[child.NodeID] = cb
+			resigned[child.NodeID] = true
+			cix, err := LoadIndex(e.ObjectsDir, cb, e.Identity)
+			if err != nil {
+				return err
+			}
+			if err := e.reencodeNodeContent(state, child.NodeID, cix, plan, ""); err != nil {
+				return err
+			}
+		}
+		if err := e.grantSubtreeReader(state, child.NodeID, member, plan, resigned); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (e *Engine) revokeSubtreeReader(state *engineState, nodeID, iid string, plan *Plan, resigned map[string]bool) (bool, error) {
+	any := false
+	for _, child := range state.tree[nodeID].Children {
+		cb := state.tree[child.NodeID]
+		cix, err := LoadIndex(e.ObjectsDir, cb, e.Identity)
+		if err != nil {
+			return any, err
+		}
+		changed := false
+		if hasMember(cb.Readers, iid) {
+			cb.Readers = removeMember(cb.Readers, iid)
+			changed = true
+		}
+		if hasMember(cb.ExtraReaders, iid) {
+			cb.ExtraReaders = removeMember(cb.ExtraReaders, iid)
+			changed = true
+		}
+		for name, entry := range cix.Entries {
+			if hasMember(entry.Readers, iid) {
+				entry.Readers = removeMember(entry.Readers, iid)
+				cix.Entries[name] = entry
+				changed = true
+			}
+		}
+		if changed {
+			cb.Version++
+			cb.UpdatedAt = e.nowStr()
+			state.tree[child.NodeID] = cb
+			resigned[child.NodeID] = true
+			if err := e.reencodeNodeContent(state, child.NodeID, cix, plan, ""); err != nil {
+				return any, err
+			}
+			for name := range cix.Entries {
+				plan.Rotation = append(plan.Rotation, pathName(state.tree, child.NodeID)+"/"+name)
+			}
+			any = true
+		}
+		childAny, err := e.revokeSubtreeReader(state, child.NodeID, iid, plan, resigned)
+		if err != nil {
+			return any, err
+		}
+		any = any || childAny
+	}
+	return any, nil
 }
 
 func (e *Engine) targetNode(state *engineState, path []string) (string, *Index, error) {

@@ -167,7 +167,7 @@ func readStoreRootSelfVerified(repoDir string) ([]byte, []byte, *manifest.StoreR
 	for _, r := range raw.Recovery {
 		selfKeys = append(selfKeys, r.SignPubkey)
 	}
-	root, err := manifest.VerifyStoreRoot(doc, sig, selfKeys, bundle.Ed25519Verifier{})
+	root, _, err := manifest.VerifyStoreRoot(doc, sig, selfKeys, bundle.Ed25519Verifier{})
 	if err != nil {
 		return nil, nil, nil, err
 	}

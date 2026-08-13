@@ -72,7 +72,7 @@ func TestInitV2CreatesReadableStore(t *testing.T) {
 	}
 
 	fx.fake.Lines = nil
-	if err := runVerify(context.Background(), fx.app, true); err != nil {
+	if err := runVerify(context.Background(), fx.app, true, false); err != nil {
 		t.Fatalf("verify: %v", err)
 	}
 	if len(fx.fake.Lines) != 1 || fx.fake.Lines[0] != "verified 1 nodes, 0 entries" {
@@ -84,7 +84,7 @@ func TestInitV2CreatesReadableStore(t *testing.T) {
 		t.Fatalf("status: %v", err)
 	}
 	joined := strings.Join(fx.fake.Lines, "\n")
-	if !strings.Contains(joined, "schema: 2") || !strings.Contains(joined, "role: admin") {
+	if !strings.Contains(joined, "schema: 3") || !strings.Contains(joined, "role: admin") {
 		t.Fatalf("status output: %v", fx.fake.Lines)
 	}
 
@@ -198,7 +198,7 @@ func TestV2StoreEndToEnd(t *testing.T) {
 	}
 
 	clientFake.Lines = nil
-	if err := runVerify(context.Background(), clientApp, true); err != nil {
+	if err := runVerify(context.Background(), clientApp, true, false); err != nil {
 		t.Fatalf("client verify: %v", err)
 	}
 }
@@ -224,7 +224,7 @@ func TestVerifyDetectsTamperedObject(t *testing.T) {
 	if !tampered {
 		t.Fatalf("no secret object found to tamper")
 	}
-	err = runVerify(context.Background(), adminApp, true)
+	err = runVerify(context.Background(), adminApp, true, false)
 	var exitErr *ExitError
 	if !errors.As(err, &exitErr) || exitErr.Code != ExitCrypto {
 		t.Fatalf("verify err = %v, want ExitCrypto", err)

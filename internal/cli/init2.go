@@ -111,14 +111,14 @@ func runInitV2(ctx context.Context, a *app.App, f *initFlags) error {
 	recovery := []string{recoveryRecipient}
 
 	rootBody := manifest.ManifestBody{
-		Schema: manifest.Schema, Kind: manifest.KindManifest,
+		Schema: manifest.SchemaSealed, Kind: manifest.KindManifest,
 		StoreID: storeID, NodeID: rootNodeID, Version: 1, UpdatedAt: createdAt,
 		Name: "", ParentID: "",
 		Owners:        []manifest.Owner{{IID: founderID, AgeRecipient: recipient, SignPubkey: signPub}},
 		IndexObjectID: rootIndexID,
 	}
 	rootIndex := manifest.Index{
-		Schema: manifest.Schema, Kind: manifest.KindIndex,
+		Schema: manifest.SchemaSealed, Kind: manifest.KindIndex,
 		StoreID: storeID, NodeID: rootNodeID, Entries: map[string]manifest.IndexEntry{},
 	}
 	tree := manifest.Tree{rootNodeID: rootBody}
@@ -149,7 +149,7 @@ func runInitV2(ctx context.Context, a *app.App, f *initFlags) error {
 	}
 
 	root := manifest.StoreRoot{
-		Schema: manifest.Schema, StoreID: storeID, CreatedAt: createdAt,
+		Schema: manifest.SchemaSealed, Version: 1, StoreID: storeID, CreatedAt: createdAt,
 		Format:     manifest.DefaultStoreFormat(),
 		GitHub:     manifest.StoreGitHub{Owner: f.owner, Repo: f.repo, DefaultBranch: "main"},
 		RootNodeID: rootNodeID,
@@ -210,6 +210,7 @@ func runInitV2(ctx context.Context, a *app.App, f *initFlags) error {
 
 	pins := &manifest.Pins{
 		StoreID:      storeID,
+		StoreVersion: root.Version,
 		TrustAnchors: root.TrustAnchors,
 		NodeVersions: map[string]int{rootNodeID: 1},
 		UpdatedAt:    createdAt,
@@ -223,6 +224,10 @@ func runInitV2(ctx context.Context, a *app.App, f *initFlags) error {
 
 	a.UI.Println(fmt.Sprintf("initialized kauket v2 store %s/%s", f.owner, f.repo))
 	a.UI.Println(fmt.Sprintf("founder identity %s created", founderID))
+	if fpr, ferr := manifest.SignKeyFingerprint(signPub); ferr == nil {
+		a.UI.Println(fmt.Sprintf("store trust-anchor fingerprint: %s", fpr))
+		a.UI.Println("share it out of band; enrollees pin it with: kauket enroll --anchor <fingerprint>")
+	}
 	a.UI.Println(fmt.Sprintf("recovery key pair written to %s", f.recoveryOut))
 	a.UI.Println("move the recovery keys OFFLINE now; they can decrypt every secret in this store")
 	return nil

@@ -47,6 +47,9 @@ func InstallAWSProfile(id string, content []byte, opts Options) (ProfileResult, 
 	if err != nil {
 		return ProfileResult{}, fmt.Errorf("install: %w", err)
 	}
+	if err := awsconfig.ValidateEnvelope(env, opts.DeniedAWSKeys); err != nil {
+		return ProfileResult{}, fmt.Errorf("install: %w", err)
+	}
 
 	state, err := LoadState(opts.Home)
 	if err != nil {

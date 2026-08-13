@@ -80,7 +80,7 @@ func DecodeManifest(ct []byte, ip agebox.IdentityProvider) (ManifestFile, error)
 	if err := json.Unmarshal(plain, &f); err != nil {
 		return ManifestFile{}, fmt.Errorf("kauket: parse manifest: %w", err)
 	}
-	if f.Body.Schema != Schema || f.Body.Kind != KindManifest {
+	if !schemaSupported(f.Body.Schema) || f.Body.Kind != KindManifest {
 		return ManifestFile{}, fmt.Errorf("kauket: unsupported manifest schema %d kind %q", f.Body.Schema, f.Body.Kind)
 	}
 	return f, nil
@@ -125,6 +125,10 @@ func fingerprintOf(sshPublicKey string) (string, error) {
 	return ssh.FingerprintSHA256(pub), nil
 }
 
+func SignKeyFingerprint(sshPublicKey string) (string, error) {
+	return fingerprintOf(sshPublicKey)
+}
+
 func EncodeIndex(ix Index, rp agebox.RecipientProvider) ([]byte, string, error) {
 	canonical, err := model.MarshalCanonical(ix)
 	if err != nil {
@@ -157,7 +161,7 @@ func DecodeIndex(ct []byte, ip agebox.IdentityProvider, wantSHA string) (Index, 
 	if err := json.Unmarshal(plain, &ix); err != nil {
 		return Index{}, fmt.Errorf("kauket: parse index: %w", err)
 	}
-	if ix.Schema != Schema || ix.Kind != KindIndex {
+	if !schemaSupported(ix.Schema) || ix.Kind != KindIndex {
 		return Index{}, fmt.Errorf("kauket: unsupported index schema %d kind %q", ix.Schema, ix.Kind)
 	}
 	if ix.Entries == nil {
@@ -198,7 +202,7 @@ func DecodeObject(ct []byte, ip agebox.IdentityProvider, wantSHA string) (Object
 	if err := json.Unmarshal(plain, &o); err != nil {
 		return Object{}, fmt.Errorf("kauket: parse object: %w", err)
 	}
-	if o.Schema != Schema {
+	if !schemaSupported(o.Schema) {
 		return Object{}, fmt.Errorf("kauket: unsupported object schema %d", o.Schema)
 	}
 	return o, nil
@@ -233,7 +237,7 @@ func DecodeRoutedRequest(ct []byte, ip agebox.IdentityProvider) (RoutedRequest, 
 	if err := json.Unmarshal(plain, &rr); err != nil {
 		return RoutedRequest{}, fmt.Errorf("kauket: parse routed request: %w", err)
 	}
-	if rr.Schema != Schema || rr.Kind != KindRoutedRequest {
+	if !schemaSupported(rr.Schema) || rr.Kind != KindRoutedRequest {
 		return RoutedRequest{}, fmt.Errorf("kauket: unsupported routed request schema %d kind %q", rr.Schema, rr.Kind)
 	}
 	return rr, nil
@@ -265,25 +269,25 @@ func SignStoreRoot(root StoreRoot, signer bundle.Signer) ([]byte, []byte, error)
 	return doc, sigDoc, nil
 }
 
-func VerifyStoreRoot(doc, sigDoc []byte, pinnedSignKeys []string, v bundle.Verifier) (StoreRoot, error) {
+func VerifyStoreRoot(doc, sigDoc []byte, pinnedSignKeys []string, v bundle.Verifier) (StoreRoot, string, error) {
 	var root StoreRoot
 	if err := json.Unmarshal(doc, &root); err != nil {
-		return StoreRoot{}, fmt.Errorf("kauket: parse store.json: %w", err)
+		return StoreRoot{}, "", fmt.Errorf("kauket: parse store.json: %w", err)
 	}
-	if root.Schema != Schema {
-		return StoreRoot{}, fmt.Errorf("kauket: unsupported store schema %d", root.Schema)
+	if !schemaSupported(root.Schema) {
+		return StoreRoot{}, "", fmt.Errorf("kauket: unsupported store schema %d", root.Schema)
 	}
 	var sig Signature
 	if err := json.Unmarshal(sigDoc, &sig); err != nil {
-		return StoreRoot{}, fmt.Errorf("kauket: parse store.json.sig: %w", err)
+		return StoreRoot{}, "", fmt.Errorf("kauket: parse store.json.sig: %w", err)
 	}
 	canonical, err := model.MarshalCanonical(root)
 	if err != nil {
-		return StoreRoot{}, fmt.Errorf("kauket: canonicalize store root: %w", err)
+		return StoreRoot{}, "", fmt.Errorf("kauket: canonicalize store root: %w", err)
 	}
 	sigBytes, err := base64.StdEncoding.DecodeString(sig.SignatureBase64)
 	if err != nil {
-		return StoreRoot{}, fmt.Errorf("kauket: decode store root signature: %w", err)
+		return StoreRoot{}, "", fmt.Errorf("kauket: decode store root signature: %w", err)
 	}
 	for _, key := range pinnedSignKeys {
 		fpr, err := fingerprintOf(key)
@@ -294,9 +298,9 @@ func VerifyStoreRoot(doc, sigDoc []byte, pinnedSignKeys []string, v bundle.Verif
 			continue
 		}
 		if err := v.Verify(canonical, sigBytes, key); err != nil {
-			return StoreRoot{}, fmt.Errorf("%w: %v", ErrUntrustedSigner, err)
+			return StoreRoot{}, "", fmt.Errorf("%w: %v", ErrUntrustedSigner, err)
 		}
-		return root, nil
+		return root, key, nil
 	}
-	return StoreRoot{}, ErrUntrustedSigner
+	return StoreRoot{}, "", ErrUntrustedSigner
 }

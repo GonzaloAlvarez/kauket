@@ -48,24 +48,32 @@ type V2Local struct {
 	SignKeyPath string `json:"sign_key_path"`
 }
 
+type InstallPolicy struct {
+	AllowedRoots    []string `json:"allowed_roots,omitempty"`
+	AllowLooseModes bool     `json:"allow_loose_modes,omitempty"`
+	DeniedAWSKeys   []string `json:"denied_aws_keys,omitempty"`
+}
+
 type Admin struct {
-	Schema       int          `json:"schema"`
-	Role         Role         `json:"role"`
-	StoreID      string       `json:"store_id"`
-	Repo         RepoInfo     `json:"repo"`
-	Admin        AdminInfo    `json:"admin"`
-	CommitAuthor CommitAuthor `json:"commit_author"`
-	V2           *V2Local     `json:"v2,omitempty"`
+	Schema       int            `json:"schema"`
+	Role         Role           `json:"role"`
+	StoreID      string         `json:"store_id"`
+	Repo         RepoInfo       `json:"repo"`
+	Admin        AdminInfo      `json:"admin"`
+	CommitAuthor CommitAuthor   `json:"commit_author"`
+	V2           *V2Local       `json:"v2,omitempty"`
+	Install      *InstallPolicy `json:"install,omitempty"`
 }
 
 type Client struct {
-	Schema       int          `json:"schema"`
-	Role         Role         `json:"role"`
-	StoreID      string       `json:"store_id"`
-	Host         HostInfo     `json:"host"`
-	Repo         RepoInfo     `json:"repo"`
-	CommitAuthor CommitAuthor `json:"commit_author"`
-	V2           *V2Local     `json:"v2,omitempty"`
+	Schema       int            `json:"schema"`
+	Role         Role           `json:"role"`
+	StoreID      string         `json:"store_id"`
+	Host         HostInfo       `json:"host"`
+	Repo         RepoInfo       `json:"repo"`
+	CommitAuthor CommitAuthor   `json:"commit_author"`
+	V2           *V2Local       `json:"v2,omitempty"`
+	Install      *InstallPolicy `json:"install,omitempty"`
 }
 
 var (

@@ -71,6 +71,9 @@ func verifyNode(f ManifestFile, root StoreRoot, parent *ManifestBody, pins *Pins
 		attested := make([]string, 0, len(parent.Children))
 		for _, c := range parent.Children {
 			if c.NodeID == f.Body.NodeID {
+				if c.Name != "" && c.Name != f.Body.Name {
+					return fmt.Errorf("%w: node %s name %q does not match parent attestation name %q", ErrUnattestedChild, f.Body.NodeID, f.Body.Name, c.Name)
+				}
 				attested = append(attested, c.OwnerSignKeys...)
 				break
 			}
@@ -108,6 +111,9 @@ func WalkSpine(objectsDir string, root StoreRoot, pins *Pins, ip agebox.Identity
 		parentBody := current.Body
 		var next *ManifestFile
 		for _, child := range parentBody.Children {
+			if child.Name != "" && child.Name != segment {
+				continue
+			}
 			childFile, err := ReadManifest(objectsDir, child.NodeID, ip)
 			if err != nil {
 				if errors.Is(err, ErrNotFound) {

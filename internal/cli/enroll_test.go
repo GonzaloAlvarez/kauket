@@ -78,17 +78,24 @@ func TestEnrollSuccess(t *testing.T) {
 		t.Fatalf("runEnroll: %v", err)
 	}
 
-	if len(fake.Lines) != 3 {
-		t.Fatalf("expected 3 output lines, got %d: %v", len(fake.Lines), fake.Lines)
+	lines := make([]string, 0, len(fake.Lines))
+	for _, l := range fake.Lines {
+		if strings.HasPrefix(l, "warning: trust-on-first-use:") {
+			continue
+		}
+		lines = append(lines, l)
 	}
-	if !strings.HasPrefix(fake.Lines[0], "created enrollment request rq_") {
-		t.Fatalf("first line %q does not start with created enrollment request rq_", fake.Lines[0])
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 output lines, got %d: %v", len(lines), fake.Lines)
 	}
-	if fake.Lines[1] != "requested paths: ssh" {
-		t.Fatalf("second line %q, want %q", fake.Lines[1], "requested paths: ssh")
+	if !strings.HasPrefix(lines[0], "created enrollment request rq_") {
+		t.Fatalf("first line %q does not start with created enrollment request rq_", lines[0])
 	}
-	if fake.Lines[2] != "waiting for approval" {
-		t.Fatalf("third line %q, want %q", fake.Lines[2], "waiting for approval")
+	if lines[1] != "requested paths: ssh" {
+		t.Fatalf("second line %q, want %q", lines[1], "requested paths: ssh")
+	}
+	if lines[2] != "waiting for approval" {
+		t.Fatalf("third line %q, want %q", lines[2], "waiting for approval")
 	}
 
 	wantFiles := []struct {
@@ -264,11 +271,18 @@ func TestEnrollOfflineMode(t *testing.T) {
 		t.Fatalf("runEnroll offline: %v", err)
 	}
 
-	if len(fake.Lines) < 3 {
-		t.Fatalf("expected at least 3 output lines, got %d: %v", len(fake.Lines), fake.Lines)
+	offlineLines := make([]string, 0, len(fake.Lines))
+	for _, l := range fake.Lines {
+		if strings.HasPrefix(l, "warning: trust-on-first-use:") {
+			continue
+		}
+		offlineLines = append(offlineLines, l)
 	}
-	if fake.Lines[0] != "created offline enrollment request" {
-		t.Fatalf("first line %q, want 'created offline enrollment request'", fake.Lines[0])
+	if len(offlineLines) < 3 {
+		t.Fatalf("expected at least 3 output lines, got %d: %v", len(offlineLines), fake.Lines)
+	}
+	if offlineLines[0] != "created offline enrollment request" {
+		t.Fatalf("first line %q, want 'created offline enrollment request'", offlineLines[0])
 	}
 	var codeLine string
 	for _, l := range fake.Lines {

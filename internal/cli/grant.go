@@ -53,6 +53,7 @@ func runGrant(ctx context.Context, a *app.App, identityID, pathArg, key string, 
 			return nil
 		}
 	}
+	subtree := key == "" && strings.HasSuffix(strings.TrimSpace(pathArg), "/")
 	path := splitNodePath(pathArg)
 	var grantedRecord manifest.IdentityRecord
 	post := func(repoDir, signKeyPath string, vctx *v2Context) error {
@@ -67,7 +68,7 @@ func runGrant(ctx context.Context, a *app.App, identityID, pathArg, key string, 
 			return manifest.Intent{}, &ExitError{Code: ExitUsage, Err: err}
 		}
 		grantedRecord = rec
-		return manifest.Intent{Op: manifest.OpGrant, Path: path, Key: key, Identity: rec, AsOwner: asOwner}, nil
+		return manifest.Intent{Op: manifest.OpGrant, Path: path, Key: key, Identity: rec, AsOwner: asOwner, Subtree: subtree}, nil
 	}, post)
 	if err != nil {
 		return err

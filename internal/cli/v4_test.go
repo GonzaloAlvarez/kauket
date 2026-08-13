@@ -71,7 +71,7 @@ func TestV2EnrollRequestApproveGet(t *testing.T) {
 		t.Fatalf("content = %q, want %q", out, content)
 	}
 
-	if err := runVerify(context.Background(), clientApp, true); err != nil {
+	if err := runVerify(context.Background(), clientApp, true, false); err != nil {
 		t.Fatalf("client verify: %v", err)
 	}
 }

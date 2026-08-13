@@ -58,20 +58,27 @@ func TestInitFreshLocalRemoteWritesExpectedFiles(t *testing.T) {
 		t.Fatalf("runInit: %v", err)
 	}
 
-	if len(fake.Lines) != 4 {
-		t.Fatalf("expected 4 output lines, got %d: %v", len(fake.Lines), fake.Lines)
+	lines := make([]string, 0, len(fake.Lines))
+	for _, l := range fake.Lines {
+		if strings.HasPrefix(l, "store trust-anchor fingerprint:") || strings.HasPrefix(l, "share it out of band") {
+			continue
+		}
+		lines = append(lines, l)
 	}
-	if fake.Lines[0] != "initialized kauket v2 store GonzaloAlvarez/kauket-store" {
-		t.Fatalf("first line: %q", fake.Lines[0])
+	if len(lines) != 4 {
+		t.Fatalf("expected 4 output lines, got %d: %v", len(lines), fake.Lines)
 	}
-	if !strings.HasPrefix(fake.Lines[1], "founder identity i_") || !strings.HasSuffix(fake.Lines[1], " created") {
-		t.Fatalf("second line: %q", fake.Lines[1])
+	if lines[0] != "initialized kauket v2 store GonzaloAlvarez/kauket-store" {
+		t.Fatalf("first line: %q", lines[0])
 	}
-	if fake.Lines[2] != "recovery key pair written to "+recoveryOut {
-		t.Fatalf("third line: %q", fake.Lines[2])
+	if !strings.HasPrefix(lines[1], "founder identity i_") || !strings.HasSuffix(lines[1], " created") {
+		t.Fatalf("second line: %q", lines[1])
 	}
-	if !strings.Contains(fake.Lines[3], "OFFLINE") {
-		t.Fatalf("fourth line: %q", fake.Lines[3])
+	if lines[2] != "recovery key pair written to "+recoveryOut {
+		t.Fatalf("third line: %q", lines[2])
+	}
+	if !strings.Contains(lines[3], "OFFLINE") {
+		t.Fatalf("fourth line: %q", lines[3])
 	}
 
 	adminHome := config.RoleHome(home, config.RoleAdmin)

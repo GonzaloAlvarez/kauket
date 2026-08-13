@@ -82,7 +82,7 @@ func TestInitLocalE2E(t *testing.T) {
 	wantLines := []string{
 		"role: admin",
 		"store: GonzaloAlvarez/kauket-store",
-		"schema: 2",
+		"schema: 3 (sealed)",
 		"nodes readable: 1",
 		"entries readable: 0",
 	}

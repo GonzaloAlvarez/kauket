@@ -86,7 +86,7 @@ func TestV2RescueOrphanedNode(t *testing.T) {
 		t.Fatalf("content = %q", out)
 	}
 
-	if err := runVerify(context.Background(), fx.app, true); err != nil {
+	if err := runVerify(context.Background(), fx.app, true, false); err != nil {
 		t.Fatalf("verify after rescue: %v", err)
 	}
 }

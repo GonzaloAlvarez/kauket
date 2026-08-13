@@ -13,3 +13,21 @@ func ValidateSecretID(id string) error {
 	}
 	return nil
 }
+
+var identityIDRegex = regexp.MustCompile(`^(h_|i_)[a-z2-7]{16}$`)
+
+func ValidateIdentityID(id string) error {
+	if !identityIDRegex.MatchString(id) {
+		return fmt.Errorf("identity id %q is invalid", id)
+	}
+	return nil
+}
+
+var requestIDRegex = regexp.MustCompile(`^rq_[a-z2-7]{16}$`)
+
+func ValidateRequestID(id string) error {
+	if !requestIDRegex.MatchString(id) {
+		return fmt.Errorf("request id %q is invalid", id)
+	}
+	return nil
+}

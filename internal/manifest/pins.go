@@ -13,6 +13,7 @@ const pinsSchema = 1
 type Pins struct {
 	Schema              int            `json:"schema"`
 	StoreID             string         `json:"store_id"`
+	StoreVersion        int            `json:"store_version,omitempty"`
 	TrustAnchors        []TrustAnchor  `json:"trust_anchors"`
 	RecoverySignPubkeys []string       `json:"recovery_sign_pubkeys"`
 	NodeVersions        map[string]int `json:"node_versions"`

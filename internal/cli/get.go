@@ -91,6 +91,24 @@ func runGet(ctx context.Context, a *app.App, f *getFlags, secretID string) error
 	return getV2(a, home, cfg.Host.IdentityPath, cfg.V2, f, secretID)
 }
 
+func installPolicyFor(home string) *config.InstallPolicy {
+	if cfg, err := config.LoadClient(home); err == nil {
+		return cfg.Install
+	}
+	if cfg, err := config.LoadAdmin(home); err == nil {
+		return cfg.Install
+	}
+	return nil
+}
+
+func applyInstallPolicy(opts *install.Options, home string) {
+	if pol := installPolicyFor(home); pol != nil {
+		opts.AllowedRoots = pol.AllowedRoots
+		opts.AllowLooseModes = pol.AllowLooseModes
+		opts.DeniedAWSKeys = pol.DeniedAWSKeys
+	}
+}
+
 func installAWSProfileSecret(a *app.App, home, secretID string, content []byte, f *getFlags) error {
 	now := a.Now
 	if now == nil {
@@ -102,6 +120,7 @@ func installAWSProfileSecret(a *app.App, home, secretID string, content []byte, 
 		Backup: f.backup,
 		Now:    now,
 	}
+	applyInstallPolicy(&opts, home)
 	res, err := install.InstallAWSProfile(secretID, content, opts)
 	if err != nil {
 		return translateInstallError(err)
@@ -202,6 +221,7 @@ func installSecret(a *app.App, home, secretID string, content []byte, secret mod
 		Backup: f.backup,
 		Now:    now,
 	}
+	applyInstallPolicy(&opts, home)
 	res, err := install.InstallFile(secretID, content, spec, opts)
 	if err != nil {
 		return translateInstallError(err)

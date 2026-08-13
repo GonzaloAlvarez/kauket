@@ -79,7 +79,16 @@ func statusV2(a *app.App, home string, role config.Role, identityPath string, v2
 	}
 	a.UI.Println(fmt.Sprintf("role: %s", role))
 	a.UI.Println(fmt.Sprintf("store: %s/%s", vctx.root.GitHub.Owner, vctx.root.GitHub.Repo))
-	a.UI.Println("schema: 2")
+	if vctx.root.Sealed() {
+		a.UI.Println(fmt.Sprintf("schema: %d (sealed)", vctx.root.Schema))
+	} else {
+		a.UI.Println(fmt.Sprintf("schema: %d (run 'kauket reseal' to activate rollback/attestation protections)", vctx.root.Schema))
+	}
+	for _, t := range vctx.root.TrustAnchors {
+		if fpr, ferr := manifest.SignKeyFingerprint(t.SignPubkey); ferr == nil {
+			a.UI.Println(fmt.Sprintf("trust-anchor fingerprint: %s", fpr))
+		}
+	}
 	a.UI.Println(fmt.Sprintf("nodes readable: %d", nodeCount))
 	a.UI.Println(fmt.Sprintf("entries readable: %d", len(entries)))
 	return nil

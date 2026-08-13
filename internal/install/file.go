@@ -12,10 +12,67 @@ import (
 )
 
 type Options struct {
-	Home   string
-	Force  bool
-	Backup bool
-	Now    func() time.Time
+	Home            string
+	Force           bool
+	Backup          bool
+	Now             func() time.Time
+	AllowedRoots    []string
+	AllowLooseModes bool
+	DeniedAWSKeys   []string
+}
+
+var deniedTargetSuffixes = []string{
+	"/.bashrc", "/.bash_profile", "/.bash_login", "/.profile",
+	"/.zshrc", "/.zshenv", "/.zprofile", "/.zlogin",
+	"/.ssh/authorized_keys", "/.ssh/authorized_keys2",
+	"/.config/autostart", "/library/launchagents", "/library/launchdaemons",
+	"/.config/systemd",
+}
+
+func checkWithinAllowedRoot(dest string, roots []string) error {
+	if len(roots) == 0 {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("install: user home: %w", err)
+		}
+		if resolved, rerr := filepath.EvalSymlinks(home); rerr == nil {
+			home = resolved
+		}
+		roots = []string{home}
+	}
+	cleaned := filepath.Clean(dest)
+	for _, r := range roots {
+		rc := filepath.Clean(expandRoot(r))
+		if cleaned == rc || strings.HasPrefix(cleaned, rc+string(os.PathSeparator)) {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: %s", ErrDestinationOutsideRoot, dest)
+}
+
+func expandRoot(r string) string {
+	if strings.HasPrefix(r, "~/") || r == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			if resolved, rerr := filepath.EvalSymlinks(home); rerr == nil {
+				home = resolved
+			}
+			if r == "~" {
+				return home
+			}
+			return filepath.Join(home, strings.TrimPrefix(r, "~/"))
+		}
+	}
+	return r
+}
+
+func checkNotDeniedTarget(dest string) error {
+	lower := strings.ToLower(filepath.ToSlash(dest))
+	for _, suf := range deniedTargetSuffixes {
+		if strings.HasSuffix(lower, suf) || strings.Contains(lower, suf+"/") {
+			return fmt.Errorf("%w: %s", ErrDeniedTarget, dest)
+		}
+	}
+	return nil
 }
 
 type ResultStatus int
@@ -30,6 +87,32 @@ const (
 type Result struct {
 	Status     ResultStatus
 	BackupPath string
+}
+
+func PreflightInstall(spec InstallSpec, opts Options) error {
+	if containsTraversal(spec.Destination) {
+		return ErrPathTraversal
+	}
+	expanded, err := expandPath(spec.Destination)
+	if err != nil {
+		return err
+	}
+	if containsTraversal(expanded) {
+		return ErrPathTraversal
+	}
+	if !filepath.IsAbs(expanded) {
+		return ErrRelativeDest
+	}
+	if err := checkWithinAllowedRoot(expanded, opts.AllowedRoots); err != nil {
+		return err
+	}
+	if err := checkNotDeniedTarget(expanded); err != nil {
+		return err
+	}
+	if err := ValidateSecretMode(spec.Mode, opts.AllowLooseModes); err != nil {
+		return err
+	}
+	return ValidateDirMode(spec.DirectoryMode)
 }
 
 func InstallFile(id string, content []byte, spec InstallSpec, opts Options) (Result, error) {
@@ -50,6 +133,18 @@ func InstallFile(id string, content []byte, spec InstallSpec, opts Options) (Res
 	}
 	if !filepath.IsAbs(expanded) {
 		return Result{}, ErrRelativeDest
+	}
+	if err := checkWithinAllowedRoot(expanded, opts.AllowedRoots); err != nil {
+		return Result{}, err
+	}
+	if err := checkNotDeniedTarget(expanded); err != nil {
+		return Result{}, err
+	}
+	if err := ValidateSecretMode(spec.Mode, opts.AllowLooseModes); err != nil {
+		return Result{}, err
+	}
+	if err := ValidateDirMode(spec.DirectoryMode); err != nil {
+		return Result{}, err
 	}
 
 	if err := checkNoSymlinkAncestors(expanded); err != nil {

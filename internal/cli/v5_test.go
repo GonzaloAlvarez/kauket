@@ -83,7 +83,7 @@ func TestV2TwoOwnerIndependentGrant(t *testing.T) {
 		t.Fatalf("content = %q", out)
 	}
 
-	if err := runVerify(context.Background(), clientApp, true); err != nil {
+	if err := runVerify(context.Background(), clientApp, true, false); err != nil {
 		t.Fatalf("client verify accepts user-signed manifest: %v", err)
 	}
 }
@@ -112,7 +112,7 @@ func TestV2RevokeOwner(t *testing.T) {
 		t.Fatalf("revoked owner grant err = %v, want access refusal", err)
 	}
 
-	if err := runVerify(context.Background(), fx.app, true); err != nil {
+	if err := runVerify(context.Background(), fx.app, true, false); err != nil {
 		t.Fatalf("verify: %v", err)
 	}
 }
@@ -164,7 +164,7 @@ func TestV2RootOwnerBecomesAnchor(t *testing.T) {
 		t.Fatalf("user still in store.json after root owner revoke")
 	}
 
-	if err := runVerify(context.Background(), fx.app, true); err != nil {
+	if err := runVerify(context.Background(), fx.app, true, false); err != nil {
 		t.Fatalf("verify: %v", err)
 	}
 }

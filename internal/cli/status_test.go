@@ -1,8 +1,20 @@
 package cli
 
 import (
+	"strings"
 	"testing"
 )
+
+func statusLinesWithoutFingerprint(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	for _, l := range lines {
+		if strings.HasPrefix(l, "trust-anchor fingerprint:") {
+			continue
+		}
+		out = append(out, l)
+	}
+	return out
+}
 
 func TestStatusUninitialized(t *testing.T) {
 	a, fake, _ := newTestApp(t)
@@ -22,16 +34,17 @@ func TestStatusAdminAfterInit(t *testing.T) {
 	wantLines := []string{
 		"role: admin",
 		"store: GonzaloAlvarez/kauket-store",
-		"schema: 2",
+		"schema: 3 (sealed)",
 		"nodes readable: 1",
 		"entries readable: 0",
 	}
-	if len(fake.Lines) != len(wantLines) {
-		t.Fatalf("expected %d lines, got %d: %v", len(wantLines), len(fake.Lines), fake.Lines)
+	got := statusLinesWithoutFingerprint(fake.Lines)
+	if len(got) != len(wantLines) {
+		t.Fatalf("expected %d lines, got %d: %v", len(wantLines), len(got), fake.Lines)
 	}
 	for i, want := range wantLines {
-		if fake.Lines[i] != want {
-			t.Fatalf("line %d: want %q got %q", i, want, fake.Lines[i])
+		if got[i] != want {
+			t.Fatalf("line %d: want %q got %q", i, want, got[i])
 		}
 	}
 }
@@ -44,16 +57,17 @@ func TestStatusClient(t *testing.T) {
 	wantLines := []string{
 		"role: client",
 		"store: GonzaloAlvarez/kauket-store",
-		"schema: 2",
+		"schema: 3 (sealed)",
 		"nodes readable: 2",
 		"entries readable: 1",
 	}
-	if len(fx.fake.Lines) != len(wantLines) {
-		t.Fatalf("expected %d lines, got %d: %v", len(wantLines), len(fx.fake.Lines), fx.fake.Lines)
+	got := statusLinesWithoutFingerprint(fx.fake.Lines)
+	if len(got) != len(wantLines) {
+		t.Fatalf("expected %d lines, got %d: %v", len(wantLines), len(got), fx.fake.Lines)
 	}
 	for i, want := range wantLines {
-		if fx.fake.Lines[i] != want {
-			t.Fatalf("line %d: want %q got %q", i, want, fx.fake.Lines[i])
+		if got[i] != want {
+			t.Fatalf("line %d: want %q got %q", i, want, got[i])
 		}
 	}
 }

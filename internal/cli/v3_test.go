@@ -74,7 +74,7 @@ func TestGrantRevokeRoundtrip(t *testing.T) {
 	}
 
 	adminFake.Lines = nil
-	if err := runVerify(context.Background(), adminApp, true); err != nil {
+	if err := runVerify(context.Background(), adminApp, true, false); err != nil {
 		t.Fatalf("verify after grant/revoke: %v", err)
 	}
 }
@@ -105,7 +105,7 @@ func TestGrantSingleKey(t *testing.T) {
 	}
 
 	clientFake.Lines = nil
-	if err := runVerify(context.Background(), clientApp, true); err != nil {
+	if err := runVerify(context.Background(), clientApp, true, false); err != nil {
 		t.Fatalf("client verify: %v", err)
 	}
 	_ = keyContent
@@ -145,14 +145,14 @@ func TestAddV2CreatesIntermediateNodes(t *testing.T) {
 
 	adminHome := config.RoleHome(adminBase, config.RoleAdmin)
 	_ = adminHome
-	if err := runVerify(context.Background(), adminApp, true); err != nil {
+	if err := runVerify(context.Background(), adminApp, true, false); err != nil {
 		t.Fatalf("verify: %v", err)
 	}
 }
 
 func TestGrantUnknownIdentityFails(t *testing.T) {
 	adminApp, _, _, _, _, _, _ := v2StoreFixture(t)
-	err := runGrant(context.Background(), adminApp, "i_doesnotexist12345", "aws/profile", "", false, true)
+	err := runGrant(context.Background(), adminApp, "i_aaaaaaaaaaaaaaaa", "aws/profile", "", false, true)
 	if err == nil || !strings.Contains(err.Error(), "not enrolled") {
 		t.Fatalf("err = %v, want not-enrolled", err)
 	}
@@ -185,7 +185,7 @@ func TestNonFFRecomputeRetry(t *testing.T) {
 	if err := runGrant(context.Background(), adminApp, hostID, "aws/profile", "", false, true); err != nil {
 		t.Fatalf("grant with concurrent writer: %v", err)
 	}
-	if err := runVerify(context.Background(), adminApp, false); err != nil {
+	if err := runVerify(context.Background(), adminApp, false, false); err != nil {
 		t.Fatalf("verify after race: %v", err)
 	}
 }

@@ -34,6 +34,7 @@ type enrollFlags struct {
 	remote   string
 	offline  bool
 	yes      bool
+	anchor   string
 }
 
 func NewEnroll(a *app.App) *cobra.Command {
@@ -51,6 +52,7 @@ func NewEnroll(a *app.App) *cobra.Command {
 	cmd.Flags().StringVar(&f.remote, "remote", "", "explicit Git remote URL")
 	cmd.Flags().BoolVar(&f.offline, "offline", false, "print request code instead of pushing to remote")
 	cmd.Flags().BoolVar(&f.yes, "yes", false, "noninteractive")
+	cmd.Flags().StringVar(&f.anchor, "anchor", "", "expected store trust-anchor fingerprint (out-of-band); refuses to pin a different anchor")
 	return cmd
 }
 
@@ -149,7 +151,11 @@ func runEnroll(ctx context.Context, a *app.App, f *enrollFlags) error {
 		now = time.Now
 	}
 
-	repoMeta, storeRoot, err := fetchStoreDoc(ctx, a, remoteURL, transport, now)
+	expectedAnchor := f.anchor
+	if expectedAnchor == "" {
+		expectedAnchor = os.Getenv("KAUKET_ANCHOR")
+	}
+	repoMeta, storeRoot, err := fetchStoreDoc(ctx, a, remoteURL, transport, now, expectedAnchor)
 	if err != nil {
 		return &ExitError{Code: ExitSync, Err: err}
 	}

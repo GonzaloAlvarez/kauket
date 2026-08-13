@@ -97,6 +97,9 @@ func CaptureProfile(profile string, configText, credsText []byte, configPath, cr
 		out.Envelope.Credentials = NormalizeSection(credSection.Raw)
 		out.Captured = append(out.Captured, fmt.Sprintf("captured [%s] from %s", credSection.Header, credsPath))
 	}
+	if err := ValidateEnvelope(out.Envelope, nil); err != nil {
+		return Capture{}, err
+	}
 	return out, nil
 }
 

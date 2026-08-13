@@ -24,7 +24,31 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func fetchStoreDoc(ctx context.Context, a *app.App, remoteURL string, transport gitstore.Transport, now func() time.Time) (*repoJSON, *manifest.StoreRoot, error) {
+func enforceAnchorPin(a *app.App, root *manifest.StoreRoot, expected string) error {
+	expected = strings.TrimSpace(expected)
+	var fprs []string
+	for _, t := range root.TrustAnchors {
+		fpr, err := manifest.SignKeyFingerprint(t.SignPubkey)
+		if err != nil {
+			continue
+		}
+		fprs = append(fprs, fpr)
+	}
+	if expected != "" {
+		for _, f := range fprs {
+			if f == expected || strings.HasSuffix(f, expected) {
+				return nil
+			}
+		}
+		return &ExitError{Code: ExitCrypto, Err: fmt.Errorf("kauket: no trust anchor matches --anchor %q; refusing to pin (store anchors: %s)", expected, strings.Join(fprs, ", "))}
+	}
+	for _, f := range fprs {
+		a.UI.Println(fmt.Sprintf("warning: trust-on-first-use: pinning store anchor %s (confirm out of band with the store operator, or pass --anchor)", f))
+	}
+	return nil
+}
+
+func fetchStoreDoc(ctx context.Context, a *app.App, remoteURL string, transport gitstore.Transport, now func() time.Time, expectedAnchor string) (*repoJSON, *manifest.StoreRoot, error) {
 	tempDir, err := os.MkdirTemp("", "kauket-fetch-")
 	if err != nil {
 		return nil, nil, fmt.Errorf("kauket: temp dir: %w", err)
@@ -73,8 +97,11 @@ func fetchStoreDoc(ctx context.Context, a *app.App, remoteURL string, transport 
 		for _, r := range raw.Recovery {
 			selfKeys = append(selfKeys, r.SignPubkey)
 		}
-		root, err := manifest.VerifyStoreRoot(doc, sig, selfKeys, bundle.Ed25519Verifier{})
+		root, _, err := manifest.VerifyStoreRoot(doc, sig, selfKeys, bundle.Ed25519Verifier{})
 		if err != nil {
+			return nil, nil, err
+		}
+		if err := enforceAnchorPin(a, &root, expectedAnchor); err != nil {
 			return nil, nil, err
 		}
 		return nil, &root, nil
@@ -204,7 +231,7 @@ func runEnrollV2(ctx context.Context, a *app.App, f *enrollFlags, home string, r
 	if err := config.SaveClient(home, clientCfg); err != nil {
 		return &ExitError{Code: ExitSync, Err: fmt.Errorf("kauket: save client config: %w", err)}
 	}
-	pins := &manifest.Pins{StoreID: root.StoreID, TrustAnchors: root.TrustAnchors, NodeVersions: map[string]int{}, UpdatedAt: now().UTC().Format(time.RFC3339)}
+	pins := &manifest.Pins{StoreID: root.StoreID, StoreVersion: root.Version, TrustAnchors: root.TrustAnchors, NodeVersions: map[string]int{}, UpdatedAt: now().UTC().Format(time.RFC3339)}
 	for _, r := range root.Recovery {
 		pins.RecoverySignPubkeys = append(pins.RecoverySignPubkeys, r.SignPubkey)
 	}
@@ -382,6 +409,7 @@ type joinFlags struct {
 	repo     string
 	remote   string
 	yes      bool
+	anchor   string
 }
 
 func NewJoin(a *app.App) *cobra.Command {
@@ -398,6 +426,7 @@ func NewJoin(a *app.App) *cobra.Command {
 	cmd.Flags().StringVar(&f.repo, "repo", "", "owner/repo of the store")
 	cmd.Flags().StringVar(&f.remote, "remote", "", "explicit Git remote URL")
 	cmd.Flags().BoolVar(&f.yes, "yes", false, "noninteractive")
+	cmd.Flags().StringVar(&f.anchor, "anchor", "", "expected store trust-anchor fingerprint (out-of-band); refuses to pin a different anchor")
 	return cmd
 }
 
@@ -454,7 +483,11 @@ func runJoin(ctx context.Context, a *app.App, f *joinFlags) error {
 	if now == nil {
 		now = time.Now
 	}
-	_, root, err := fetchStoreDoc(ctx, a, remoteURL, transport, now)
+	expectedAnchor := f.anchor
+	if expectedAnchor == "" {
+		expectedAnchor = os.Getenv("KAUKET_ANCHOR")
+	}
+	_, root, err := fetchStoreDoc(ctx, a, remoteURL, transport, now, expectedAnchor)
 	if err != nil {
 		return &ExitError{Code: ExitSync, Err: err}
 	}
@@ -528,7 +561,7 @@ func runJoin(ctx context.Context, a *app.App, f *joinFlags) error {
 	if err := config.SaveAdmin(home, adminCfg); err != nil {
 		return &ExitError{Code: ExitSync, Err: err}
 	}
-	pins := &manifest.Pins{StoreID: root.StoreID, TrustAnchors: root.TrustAnchors, NodeVersions: map[string]int{}, UpdatedAt: now().UTC().Format(time.RFC3339)}
+	pins := &manifest.Pins{StoreID: root.StoreID, StoreVersion: root.Version, TrustAnchors: root.TrustAnchors, NodeVersions: map[string]int{}, UpdatedAt: now().UTC().Format(time.RFC3339)}
 	for _, r := range root.Recovery {
 		pins.RecoverySignPubkeys = append(pins.RecoverySignPubkeys, r.SignPubkey)
 	}
