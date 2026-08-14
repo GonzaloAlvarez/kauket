@@ -246,7 +246,7 @@ func NewRequest(a *app.App) *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{
 		Use:   "request <path>",
-		Short: "Request access to a namespace or single key",
+		Short: "Request access to a namespace (including everything under it) or a single key",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRequest(cmd.Context(), a, args[0], key, yes)

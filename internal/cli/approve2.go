@@ -217,7 +217,7 @@ func approveOneV2(ctx context.Context, a *app.App, engine *manifest.Engine, repo
 		if len(segments) == 0 {
 			continue
 		}
-		plan, err := engine.Apply(manifest.Intent{Op: manifest.OpGrant, Path: segments, Identity: rec})
+		plan, err := engine.Apply(manifest.Intent{Op: manifest.OpGrant, Path: segments, Identity: rec, Subtree: true})
 		if err == nil {
 			_ = plan
 			continue

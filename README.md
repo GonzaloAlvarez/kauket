@@ -61,7 +61,7 @@ v2 replaces the single admin vault and per-host bundles with a tree of namespace
 kauket init --recovery-out ~/kauket-recovery        # found a namespace store (move recovery keys offline)
 kauket add aws.profile.amzn-wanfe ...               # dotted ids are namespace paths
 kauket enroll --request aws/profile                 # a machine requests a namespace path
-kauket approve                                       # owner approves; grants the requested path
+kauket approve                                       # owner approves; grants the requested namespace and everything under it
 kauket request infra/k8s                             # an enrolled identity asks for more, any time
 kauket grant  i_9d2e neptune/                        # owner grants proactively
 kauket grant  --owner i_77ab k8s/                    # delegate ownership of a subtree

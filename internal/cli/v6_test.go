@@ -120,6 +120,81 @@ func TestV2RescueRejectsWrongRecoveryKey(t *testing.T) {
 	}
 }
 
+func TestV2ApproveNamespaceRequestGrantsSubtree(t *testing.T) {
+	fx, remoteURL, _ := v2StoreWithRecoveryDir(t)
+
+	src := filepath.Join(t.TempDir(), "other")
+	if err := os.WriteFile(src, []byte("OTHER"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := runAdd(context.Background(), fx.app, &addFlags{dest: "/etc/other"}, "other.area.secret", src); err != nil {
+		t.Fatalf("add other: %v", err)
+	}
+
+	userBase := t.TempDir()
+	userApp := &app.App{UI: &ui.Fake{}, Home: userBase}
+	if err := runJoin(context.Background(), userApp, &joinFlags{
+		requests: []string{"cloud"}, name: "subtree-user", remote: remoteURL, yes: true,
+	}); err != nil {
+		t.Fatalf("join: %v", err)
+	}
+	if err := runApprove(context.Background(), fx.app, &approveFlags{all: true, yes: true}); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		if err := runGet(context.Background(), userApp, &getFlags{stdout: true}, "cloud.vendor.api_token"); err != nil {
+			t.Fatalf("get key below requested namespace: %v", err)
+		}
+	})
+	if string(out) != "RESCUE TOKEN" {
+		t.Fatalf("content = %q", out)
+	}
+
+	err := runGet(context.Background(), userApp, &getFlags{stdout: true, noSync: true}, "other.area.secret")
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != ExitNotGranted {
+		t.Fatalf("sibling namespace get err = %v, want ExitNotGranted", err)
+	}
+}
+
+func TestV2RequestCommandNamespaceGrantsSubtree(t *testing.T) {
+	fx, remoteURL, _ := v2StoreWithRecoveryDir(t)
+
+	userBase := t.TempDir()
+	userApp := &app.App{UI: &ui.Fake{}, Home: userBase}
+	if err := runJoin(context.Background(), userApp, &joinFlags{
+		requests: []string{"nowhere"}, name: "late-requester", remote: remoteURL, yes: true,
+	}); err != nil {
+		t.Fatalf("join: %v", err)
+	}
+	if err := runApprove(context.Background(), fx.app, &approveFlags{all: true, yes: true}); err != nil {
+		t.Fatalf("approve enrollment: %v", err)
+	}
+
+	err := runGet(context.Background(), userApp, &getFlags{stdout: true}, "cloud.vendor.api_token")
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != ExitNotGranted {
+		t.Fatalf("pre-request get err = %v, want ExitNotGranted", err)
+	}
+
+	if err := runRequest(context.Background(), userApp, "cloud", "", true); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if err := runApprove(context.Background(), fx.app, &approveFlags{all: true, yes: true}); err != nil {
+		t.Fatalf("approve request: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		if err := runGet(context.Background(), userApp, &getFlags{stdout: true}, "cloud.vendor.api_token"); err != nil {
+			t.Fatalf("get key below requested namespace: %v", err)
+		}
+	})
+	if string(out) != "RESCUE TOKEN" {
+		t.Fatalf("content = %q", out)
+	}
+}
+
 func TestV2InspectMatchesReality(t *testing.T) {
 	fx, remoteURL, _ := v2StoreWithRecoveryDir(t)
 
