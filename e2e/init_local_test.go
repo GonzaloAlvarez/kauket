@@ -23,7 +23,7 @@ func TestInitLocalE2E(t *testing.T) {
 	}
 	remoteURL := setupBareRemote(t, bareDir)
 
-	res := runKauket(t, bin, kauketHome, adminHome, "init", "--remote", remoteURL, "--no-github", "--recovery-out", recoveryOut, "--yes")
+	res := runKauket(t, bin, kauketHome, adminHome, "init", "--owner", "GonzaloAlvarez", "--remote", remoteURL, "--recovery-out", recoveryOut, "--yes")
 	if res.err != nil {
 		t.Fatalf("init failed: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -59,7 +59,7 @@ func TestInitLocalE2E(t *testing.T) {
 		assertMode(t, filepath.Join(recoveryOut, "recovery-age.txt"), 0o600)
 	}
 
-	res = runKauket(t, bin, kauketHome, adminHome, "init", "--remote", remoteURL, "--no-github", "--recovery-out", recoveryOut, "--yes")
+	res = runKauket(t, bin, kauketHome, adminHome, "init", "--owner", "GonzaloAlvarez", "--remote", remoteURL, "--recovery-out", recoveryOut, "--yes")
 	if res.err == nil {
 		t.Fatalf("re-init should be refused on an existing v2 store; stdout:%s", res.stdout)
 	}
@@ -98,13 +98,5 @@ func TestInitLocalE2E(t *testing.T) {
 	}
 	if !strings.Contains(res.stdout, "verified 1 nodes, 0 entries") {
 		t.Fatalf("verify output: %q", res.stdout)
-	}
-
-	res = runKauket(t, bin, kauketHome, adminHome, "sync")
-	if res.err != nil {
-		t.Fatalf("sync failed: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
-	}
-	if strings.TrimSpace(res.stdout) != "synced" {
-		t.Fatalf("expected 'synced', got: %q", res.stdout)
 	}
 }

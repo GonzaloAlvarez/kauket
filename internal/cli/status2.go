@@ -82,7 +82,7 @@ func statusV2(a *app.App, home string, role config.Role, identityPath string, v2
 	if vctx.root.Sealed() {
 		a.UI.Println(fmt.Sprintf("schema: %d (sealed)", vctx.root.Schema))
 	} else {
-		a.UI.Println(fmt.Sprintf("schema: %d (run 'kauket reseal' to activate rollback/attestation protections)", vctx.root.Schema))
+		a.UI.Println(fmt.Sprintf("schema: %d (legacy unsealed store; seal it with kauket v2.1.x before continuing)", vctx.root.Schema))
 	}
 	for _, t := range vctx.root.TrustAnchors {
 		if fpr, ferr := manifest.SignKeyFingerprint(t.SignPubkey); ferr == nil {

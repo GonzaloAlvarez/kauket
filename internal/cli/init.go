@@ -16,21 +16,17 @@ import (
 )
 
 const (
-	defaultOwner      = "GonzaloAlvarez"
 	defaultRepoName   = "kauket-store"
 	defaultAuthorName = "Gonzalo Alvarez"
 	defaultAuthorMail = "gonzaloab@gmail.com"
 )
 
 type initFlags struct {
-	owner         string
-	repo          string
-	private       bool
-	remote        string
-	noGitHub      bool
-	adminIdentity string
-	yes           bool
-	recoveryOut   string
+	owner       string
+	repo        string
+	remote      string
+	yes         bool
+	recoveryOut string
 }
 
 func NewInit(a *app.App) *cobra.Command {
@@ -42,12 +38,9 @@ func NewInit(a *app.App) *cobra.Command {
 			return runInit(cmd.Context(), a, f)
 		},
 	}
-	cmd.Flags().StringVar(&f.owner, "owner", defaultOwner, "GitHub owner for the kauket store repo")
+	cmd.Flags().StringVar(&f.owner, "owner", "", "GitHub owner for the kauket store repo (default: your gh user)")
 	cmd.Flags().StringVar(&f.repo, "repo", defaultRepoName, "GitHub repo name for the kauket store")
-	cmd.Flags().BoolVar(&f.private, "private", true, "Create the GitHub repo as private")
 	cmd.Flags().StringVar(&f.remote, "remote", "", "Explicit Git remote URL")
-	cmd.Flags().BoolVar(&f.noGitHub, "no-github", false, "Skip GitHub API; use the --remote URL as-is")
-	cmd.Flags().StringVar(&f.adminIdentity, "admin-identity", "", "Path to an existing age identity to import")
 	cmd.Flags().BoolVar(&f.yes, "yes", false, "Noninteractive")
 	cmd.Flags().StringVar(&f.recoveryOut, "recovery-out", "", "Directory to write the offline recovery key pair (required)")
 	return cmd
@@ -60,39 +53,7 @@ func runInit(ctx context.Context, a *app.App, f *initFlags) error {
 	return runInitV2(ctx, a, f)
 }
 
-func ensureAdminIdentity(targetPath, importPath string) (string, error) {
-	if importPath != "" {
-		data, err := os.ReadFile(importPath)
-		if err != nil {
-			return "", fmt.Errorf("kauket: read admin identity: %w", err)
-		}
-		ids, err := agebox.ParseIdentity(data)
-		if err != nil {
-			return "", err
-		}
-		if len(ids) != 1 {
-			return "", fmt.Errorf("kauket: admin identity file must contain exactly one identity, found %d", len(ids))
-		}
-		x, ok := ids[0].(*age.X25519Identity)
-		if !ok {
-			return "", errors.New("kauket: admin identity must be an X25519 identity")
-		}
-		abs, err := filepath.Abs(importPath)
-		if err != nil {
-			return "", err
-		}
-		absTarget, err := filepath.Abs(targetPath)
-		if err != nil {
-			return "", err
-		}
-		if abs != absTarget {
-			if err := writeIdentityFile(targetPath, []byte(x.String()+"\n")); err != nil {
-				return "", err
-			}
-		}
-		return x.Recipient().String(), nil
-	}
-
+func ensureAdminIdentity(targetPath string) (string, error) {
 	if _, err := os.Stat(targetPath); err == nil {
 		data, readErr := os.ReadFile(targetPath)
 		if readErr != nil {
@@ -142,7 +103,7 @@ func writeRepoFile(path string, data []byte) error {
 	return nil
 }
 
-func ensureGitHubRepo(ctx context.Context, hc *http.Client, token, owner, repo string, private bool) error {
+func ensureGitHubRepo(ctx context.Context, hc *http.Client, token, owner, repo string) error {
 	if hc == nil {
 		hc = http.DefaultClient
 	}
@@ -157,7 +118,7 @@ func ensureGitHubRepo(ctx context.Context, hc *http.Client, token, owner, repo s
 	}
 
 	name := repo
-	priv := private
+	priv := true
 	autoInit := false
 	newRepo := &gogithub.Repository{
 		Name:     &name,
@@ -175,31 +136,4 @@ func ensureGitHubRepo(ctx context.Context, hc *http.Client, token, owner, repo s
 		return fmt.Errorf("kauket: create repo %s/%s: %w", owner, repo, err)
 	}
 	return nil
-}
-
-type repoJSON struct {
-	Schema          int                  `json:"schema"`
-	StoreID         string               `json:"store_id"`
-	CreatedAt       string               `json:"created_at"`
-	Format          repoFormat           `json:"format"`
-	GitHub          repoGitHub           `json:"github"`
-	AdminRecipients []repoAdminRecipient `json:"admin_recipients"`
-}
-
-type repoFormat struct {
-	AdminVault string `json:"admin_vault"`
-	HostBundle string `json:"host_bundle"`
-	Request    string `json:"request"`
-	Encryption string `json:"encryption"`
-}
-
-type repoGitHub struct {
-	Owner         string `json:"owner"`
-	Repo          string `json:"repo"`
-	DefaultBranch string `json:"default_branch"`
-}
-
-type repoAdminRecipient struct {
-	ID        string `json:"id"`
-	Recipient string `json:"recipient"`
 }

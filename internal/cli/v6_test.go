@@ -18,8 +18,8 @@ func v2StoreWithRecoveryDir(t *testing.T) (*testAppBundle, string, string) {
 	a, fake, home := newTestApp(t)
 	recoveryOut := filepath.Join(t.TempDir(), "recovery")
 	flags := &initFlags{
-		owner: "GonzaloAlvarez", repo: "kauket-store", private: true,
-		remote: bareRepo(t), noGitHub: true, yes: true, recoveryOut: recoveryOut,
+		owner: "GonzaloAlvarez", repo: "kauket-store",
+		remote: bareRepo(t), yes: true, recoveryOut: recoveryOut,
 	}
 	if err := runInit(context.Background(), a, flags); err != nil {
 		t.Fatalf("init: %v", err)
@@ -86,7 +86,7 @@ func TestV2RescueOrphanedNode(t *testing.T) {
 		t.Fatalf("content = %q", out)
 	}
 
-	if err := runVerify(context.Background(), fx.app, true, false); err != nil {
+	if err := runVerify(context.Background(), fx.app, false); err != nil {
 		t.Fatalf("verify after rescue: %v", err)
 	}
 }
@@ -151,7 +151,7 @@ func TestV2ApproveNamespaceRequestGrantsSubtree(t *testing.T) {
 		t.Fatalf("content = %q", out)
 	}
 
-	err := runGet(context.Background(), userApp, &getFlags{stdout: true, noSync: true}, "other.area.secret")
+	err := runGet(context.Background(), userApp, &getFlags{stdout: true}, "other.area.secret")
 	var exitErr *ExitError
 	if !errors.As(err, &exitErr) || exitErr.Code != ExitNotGranted {
 		t.Fatalf("sibling namespace get err = %v, want ExitNotGranted", err)
@@ -178,7 +178,7 @@ func TestV2RequestCommandNamespaceGrantsSubtree(t *testing.T) {
 		t.Fatalf("pre-request get err = %v, want ExitNotGranted", err)
 	}
 
-	if err := runRequest(context.Background(), userApp, "cloud", "", true); err != nil {
+	if err := runRequest(context.Background(), userApp, []string{"cloud"}, &requestFlags{yes: true}); err != nil {
 		t.Fatalf("request: %v", err)
 	}
 	if err := runApprove(context.Background(), fx.app, &approveFlags{all: true, yes: true}); err != nil {
@@ -208,9 +208,7 @@ func TestV2InspectMatchesReality(t *testing.T) {
 
 	clientBase := t.TempDir()
 	clientApp := &app.App{UI: &ui.Fake{}, Home: clientBase}
-	if err := runEnroll(context.Background(), clientApp, &enrollFlags{
-		requests: []string{"cloud/vendor"}, name: "inspectee", remote: remoteURL, yes: true,
-	}); err != nil {
+	if err := runRequest(context.Background(), clientApp, []string{"cloud/vendor"}, &requestFlags{name: "inspectee", remote: remoteURL, yes: true}); err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
 	if err := runApprove(context.Background(), fx.app, &approveFlags{all: true, yes: true}); err != nil {
@@ -220,7 +218,7 @@ func TestV2InspectMatchesReality(t *testing.T) {
 	clientCfg, _ := config.LoadClient(clientHome)
 
 	fx.fake.Lines = nil
-	if err := runInspectAs(context.Background(), fx.app, clientCfg.Host.ID, true); err != nil {
+	if err := runInspectAs(context.Background(), fx.app, clientCfg.Host.ID); err != nil {
 		t.Fatalf("inspect: %v", err)
 	}
 	joined := strings.Join(fx.fake.Lines, "\n")
@@ -234,7 +232,7 @@ func TestV2InspectMatchesReality(t *testing.T) {
 	if err := runGet(context.Background(), clientApp, &getFlags{stdout: true}, "cloud.vendor.api_token"); err != nil {
 		t.Fatalf("reality: granted get failed: %v", err)
 	}
-	err := runGet(context.Background(), clientApp, &getFlags{stdout: true, noSync: true}, "other.area.secret")
+	err := runGet(context.Background(), clientApp, &getFlags{stdout: true}, "other.area.secret")
 	var exitErr *ExitError
 	if !errors.As(err, &exitErr) || exitErr.Code != ExitNotGranted {
 		t.Fatalf("reality: ungranted get err = %v, want ExitNotGranted", err)

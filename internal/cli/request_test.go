@@ -2,9 +2,10 @@ package cli
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
+	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -17,6 +18,7 @@ import (
 	"github.com/gonzaloalvarez/kauket/internal/app"
 	"github.com/gonzaloalvarez/kauket/internal/bundle"
 	"github.com/gonzaloalvarez/kauket/internal/config"
+	"github.com/gonzaloalvarez/kauket/internal/model"
 	"github.com/gonzaloalvarez/kauket/internal/ui"
 )
 
@@ -51,9 +53,7 @@ func setupAdminStore(t *testing.T) (baseHome, adminHome, bareURL string) {
 	flags := &initFlags{
 		owner:       "GonzaloAlvarez",
 		repo:        "kauket-store",
-		private:     true,
 		remote:      url,
-		noGitHub:    true,
 		yes:         true,
 		recoveryOut: filepath.Join(t.TempDir(), "recovery"),
 	}
@@ -63,19 +63,28 @@ func setupAdminStore(t *testing.T) (baseHome, adminHome, bareURL string) {
 	return home, config.RoleHome(home, config.RoleAdmin), url
 }
 
-func TestEnrollSuccess(t *testing.T) {
+type failingShell struct{}
+
+func (failingShell) LookPath(string) (string, error) { return "", exec.ErrNotFound }
+func (failingShell) Run(context.Context, string, ...string) ([]byte, []byte, error) {
+	return nil, nil, errors.New("no gh in tests")
+}
+
+type failingRoundTripper struct{}
+
+func (failingRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("no network in tests")
+}
+
+func TestRequestAutoEnrollSuccess(t *testing.T) {
 	_, _, bareURL := setupAdminStore(t)
 
 	clientApp, fake, clientBase := newTestApp(t)
 	clientHome := config.RoleHome(clientBase, config.RoleClient)
-	flags := &enrollFlags{
-		requests: []string{"ssh"},
-		name:     "machine2",
-		remote:   bareURL,
-		yes:      true,
-	}
-	if err := runEnroll(context.Background(), clientApp, flags); err != nil {
-		t.Fatalf("runEnroll: %v", err)
+	if err := runRequest(context.Background(), clientApp, []string{"ssh"}, &requestFlags{
+		name: "machine2", remote: bareURL, yes: true,
+	}); err != nil {
+		t.Fatalf("runRequest: %v", err)
 	}
 
 	lines := make([]string, 0, len(fake.Lines))
@@ -85,17 +94,23 @@ func TestEnrollSuccess(t *testing.T) {
 		}
 		lines = append(lines, l)
 	}
-	if len(lines) != 3 {
-		t.Fatalf("expected 3 output lines, got %d: %v", len(lines), fake.Lines)
+	if len(lines) != 5 {
+		t.Fatalf("expected 5 output lines, got %d: %v", len(lines), fake.Lines)
 	}
-	if !strings.HasPrefix(lines[0], "created enrollment request rq_") {
-		t.Fatalf("first line %q does not start with created enrollment request rq_", lines[0])
+	if lines[0] != "not enrolled yet; enrolling this machine" {
+		t.Fatalf("first line %q", lines[0])
 	}
-	if lines[1] != "requested paths: ssh" {
-		t.Fatalf("second line %q, want %q", lines[1], "requested paths: ssh")
+	if !strings.HasPrefix(lines[1], "enrolled as machine2 (h_") {
+		t.Fatalf("second line %q", lines[1])
 	}
-	if lines[2] != "waiting for approval" {
-		t.Fatalf("third line %q, want %q", lines[2], "waiting for approval")
+	if !strings.HasPrefix(lines[2], "created enrollment request rq_") {
+		t.Fatalf("third line %q does not start with created enrollment request rq_", lines[2])
+	}
+	if lines[3] != "requested paths: ssh" {
+		t.Fatalf("fourth line %q, want %q", lines[3], "requested paths: ssh")
+	}
+	if lines[4] != "waiting for approval (run 'kauket approve' on your admin machine)" {
+		t.Fatalf("fifth line %q", lines[4])
 	}
 
 	wantFiles := []struct {
@@ -192,189 +207,102 @@ func TestEnrollSuccess(t *testing.T) {
 	}
 }
 
-func TestEnrollOnAdminHomeCreatesClientAlongside(t *testing.T) {
+func TestRequestOnAdminHomeFilesAccessRequest(t *testing.T) {
 	adminBase, adminHome, bareURL := setupAdminStore(t)
 
-	a := &app.App{UI: &ui.Fake{}, Home: adminBase}
-	flags := &enrollFlags{
-		requests: []string{"ssh"},
-		name:     "dualhost",
-		remote:   bareURL,
-		yes:      true,
-	}
-	if err := runEnroll(context.Background(), a, flags); err != nil {
-		t.Fatalf("runEnroll on admin home: %v", err)
+	fake := &ui.Fake{}
+	a := &app.App{UI: fake, Home: adminBase}
+	if err := runRequest(context.Background(), a, []string{"cloud/vendor"}, &requestFlags{yes: true}); err != nil {
+		t.Fatalf("runRequest on admin home: %v", err)
 	}
 
-	clientHome := config.RoleHome(adminBase, config.RoleClient)
-	clientCfg, err := config.LoadClient(clientHome)
-	if err != nil {
-		t.Fatalf("load client alongside admin: %v", err)
+	joined := strings.Join(fake.Lines, "\n")
+	if !strings.Contains(joined, "created access request rq_") {
+		t.Fatalf("expected access request, got: %v", fake.Lines)
 	}
-	if clientCfg.Host.DisplayName != "dualhost" {
-		t.Fatalf("display name: %q", clientCfg.Host.DisplayName)
+	if _, err := config.LoadClient(config.RoleHome(adminBase, config.RoleClient)); err == nil {
+		t.Fatalf("request on admin home must not create a client role")
 	}
 	if _, err := config.LoadAdmin(adminHome); err != nil {
 		t.Fatalf("admin config should be untouched: %v", err)
 	}
-}
-
-func TestEnrollRefusesAlreadyEnrolled(t *testing.T) {
-	a, _, home := newTestApp(t)
-	clientCfg := &config.Client{
-		Schema:  config.ConfigSchema,
-		Role:    config.RoleClient,
-		StoreID: "ks_test",
-		Host: config.HostInfo{
-			ID:           "h_test1234567890",
-			IdentityPath: "identities/host.txt",
-		},
-		Repo: config.DefaultRepoInfo("GonzaloAlvarez", "kauket-store"),
-	}
-	if err := config.SaveClient(config.RoleHome(home, config.RoleClient), clientCfg); err != nil {
-		t.Fatalf("save client: %v", err)
-	}
-	flags := &enrollFlags{
-		requests: []string{"ssh"},
-		remote:   bareRepo(t),
-		yes:      true,
-	}
-	err := runEnroll(context.Background(), a, flags)
-	if err == nil {
-		t.Fatalf("expected error on already enrolled")
-	}
-	var exitErr *ExitError
-	if !errors.As(err, &exitErr) {
-		t.Fatalf("expected ExitError, got %T", err)
-	}
-	if exitErr.Code != ExitUsage {
-		t.Fatalf("expected ExitUsage, got %d", exitErr.Code)
-	}
-	if !strings.Contains(err.Error(), "already enrolled") {
-		t.Fatalf("expected 'already enrolled' mention, got %q", err.Error())
-	}
-}
-
-func TestEnrollOfflineMode(t *testing.T) {
-	_, _, bareURL := setupAdminStore(t)
-
-	clientApp, fake, clientBase := newTestApp(t)
-	clientHome := config.RoleHome(clientBase, config.RoleClient)
-	flags := &enrollFlags{
-		requests: []string{"ssh"},
-		name:     "machine2",
-		remote:   bareURL,
-		offline:  true,
-		yes:      true,
-	}
-	if err := runEnroll(context.Background(), clientApp, flags); err != nil {
-		t.Fatalf("runEnroll offline: %v", err)
-	}
-
-	offlineLines := make([]string, 0, len(fake.Lines))
-	for _, l := range fake.Lines {
-		if strings.HasPrefix(l, "warning: trust-on-first-use:") {
-			continue
-		}
-		offlineLines = append(offlineLines, l)
-	}
-	if len(offlineLines) < 3 {
-		t.Fatalf("expected at least 3 output lines, got %d: %v", len(offlineLines), fake.Lines)
-	}
-	if offlineLines[0] != "created offline enrollment request" {
-		t.Fatalf("first line %q, want 'created offline enrollment request'", offlineLines[0])
-	}
-	var codeLine string
-	for _, l := range fake.Lines {
-		if strings.HasPrefix(l, "kauket approve --request-code ") {
-			codeLine = l
-			break
-		}
-	}
-	if codeLine == "" {
-		t.Fatalf("missing 'kauket approve --request-code ...' line, got %v", fake.Lines)
-	}
-	encoded := strings.TrimPrefix(codeLine, "kauket approve --request-code ")
-	ct, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		t.Fatalf("base64 decode of request code: %v", err)
-	}
-	if len(ct) == 0 {
-		t.Fatalf("decoded ciphertext is empty")
-	}
-	if !strings.Contains(string(ct), "age-encryption") {
-		t.Fatalf("ciphertext lacks age header marker; first 64 bytes: %q", limitString(string(ct), 64))
-	}
-
 	refs := collectEnrollRequestRefs(t, bareURL)
-	if len(refs) != 0 {
-		t.Fatalf("offline mode pushed request branches: %v", refs)
-	}
-
-	cfg, err := config.LoadClient(clientHome)
-	if err != nil {
-		t.Fatalf("load client offline: %v", err)
-	}
-	if cfg.Host.ID == "" {
-		t.Fatalf("host id missing on offline enroll")
+	if len(refs) != 1 {
+		t.Fatalf("expected 1 request ref on bare, got %v", refs)
 	}
 }
 
-func TestEnrollRequiresRequestFlag(t *testing.T) {
+func TestRequestNoRepoSourceAndNoGitHub(t *testing.T) {
+	clientApp, _, _ := newTestApp(t)
+	clientApp.AuthShell = failingShell{}
+	clientApp.HTTPClient = &http.Client{Transport: failingRoundTripper{}}
+	t.Setenv("KAUKET_REPO", "")
+	err := runRequest(context.Background(), clientApp, []string{"ssh"}, &requestFlags{yes: true})
+	if err == nil {
+		t.Fatalf("expected error when no repo source and gh detection fails")
+	}
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected ExitError, got %T", err)
+	}
+	if exitErr.Code != ExitUsage {
+		t.Fatalf("expected ExitUsage, got %d", exitErr.Code)
+	}
+	if !strings.Contains(err.Error(), "--repo owner/repo or --remote") {
+		t.Fatalf("expected repo-source hint, got %q", err.Error())
+	}
+}
+
+func TestRequestKeyRequiresSinglePath(t *testing.T) {
 	_, _, bareURL := setupAdminStore(t)
 	clientApp, _, _ := newTestApp(t)
-	flags := &enrollFlags{
-		requests: nil,
-		remote:   bareURL,
-		yes:      true,
-	}
-	err := runEnroll(context.Background(), clientApp, flags)
+	err := runRequest(context.Background(), clientApp, []string{"ssh", "aws"}, &requestFlags{
+		key: "main", remote: bareURL, yes: true,
+	})
 	if err == nil {
-		t.Fatalf("expected error when --request is missing")
+		t.Fatalf("expected error for --key with multiple paths")
 	}
 	var exitErr *ExitError
-	if !errors.As(err, &exitErr) {
-		t.Fatalf("expected ExitError, got %T", err)
-	}
-	if exitErr.Code != ExitUsage {
-		t.Fatalf("expected ExitUsage, got %d", exitErr.Code)
+	if !errors.As(err, &exitErr) || exitErr.Code != ExitUsage {
+		t.Fatalf("expected ExitUsage, got %v", err)
 	}
 }
 
-func TestEnrollRequiresRemoteOrRepo(t *testing.T) {
-	clientApp, _, _ := newTestApp(t)
-	flags := &enrollFlags{
-		requests: []string{"ssh"},
-		yes:      true,
-	}
-	t.Setenv("KAUKET_REPO", "")
-	err := runEnroll(context.Background(), clientApp, flags)
-	if err == nil {
-		t.Fatalf("expected error when neither --remote nor --repo is set")
-	}
-	var exitErr *ExitError
-	if !errors.As(err, &exitErr) {
-		t.Fatalf("expected ExitError, got %T", err)
-	}
-	if exitErr.Code != ExitUsage {
-		t.Fatalf("expected ExitUsage, got %d", exitErr.Code)
-	}
-}
-
-func TestEnrollRequestEncryptedToAdminRecipient(t *testing.T) {
+func TestRequestAutoEnrollMultiplePaths(t *testing.T) {
 	_, adminHome, bareURL := setupAdminStore(t)
 
 	clientApp, _, _ := newTestApp(t)
-	flags := &enrollFlags{
-		requests: []string{"ssh"},
-		name:     "machine2",
-		remote:   bareURL,
-		yes:      true,
+	if err := runRequest(context.Background(), clientApp, []string{"ssh", "aws/profile"}, &requestFlags{
+		name: "machine2", remote: bareURL, yes: true,
+	}); err != nil {
+		t.Fatalf("runRequest: %v", err)
 	}
-	if err := runEnroll(context.Background(), clientApp, flags); err != nil {
-		t.Fatalf("runEnroll: %v", err)
+	got := decodeSingleRequest(t, bareURL, adminHome)
+	if len(got.Requested.Paths) != 2 || got.Requested.Paths[0] != "ssh" || got.Requested.Paths[1] != "aws/profile" {
+		t.Fatalf("paths: %v", got.Requested.Paths)
 	}
+}
 
+func TestRequestEncryptedToAdminRecipient(t *testing.T) {
+	_, adminHome, bareURL := setupAdminStore(t)
+
+	clientApp, _, _ := newTestApp(t)
+	if err := runRequest(context.Background(), clientApp, []string{"ssh"}, &requestFlags{
+		name: "machine2", remote: bareURL, yes: true,
+	}); err != nil {
+		t.Fatalf("runRequest: %v", err)
+	}
+	got := decodeSingleRequest(t, bareURL, adminHome)
+	if got.Host.DisplayName != "machine2" {
+		t.Fatalf("display name mismatch: %q", got.Host.DisplayName)
+	}
+	if len(got.Requested.Paths) != 1 || got.Requested.Paths[0] != "ssh" {
+		t.Fatalf("paths: %v", got.Requested.Paths)
+	}
+}
+
+func decodeSingleRequest(t *testing.T, bareURL, adminHome string) model.Request {
+	t.Helper()
 	bareDir := strings.TrimPrefix(bareURL, "file://")
 	bare, err := gogit.PlainOpen(bareDir)
 	if err != nil {
@@ -428,10 +356,32 @@ func TestEnrollRequestEncryptedToAdminRecipient(t *testing.T) {
 	if got.RequestID != requestID {
 		t.Fatalf("request id mismatch: got %q want %q", got.RequestID, requestID)
 	}
-	if got.Host.DisplayName != "machine2" {
-		t.Fatalf("display name mismatch: %q", got.Host.DisplayName)
+	return got
+}
+
+type cannedGHShell struct{ login string }
+
+func (cannedGHShell) LookPath(string) (string, error) { return "/usr/local/bin/gh", nil }
+func (s cannedGHShell) Run(_ context.Context, _ string, args ...string) ([]byte, []byte, error) {
+	out := "github.com\n  ✓ Logged in to github.com account " + s.login + " (keyring)\n  - Active account: true\n  - Token scopes: 'repo', 'admin:public_key'\n"
+	return []byte(out), nil, nil
+}
+
+func TestRequestDetectedRepoConfirmDeclined(t *testing.T) {
+	clientApp, fake, _ := newTestApp(t)
+	clientApp.AuthShell = cannedGHShell{login: "testowner"}
+	fake.ConfirmReply = false
+	t.Setenv("KAUKET_REPO", "")
+	err := runRequest(context.Background(), clientApp, []string{"ssh"}, &requestFlags{})
+	if err == nil {
+		t.Fatalf("expected error when repo confirmation is declined")
 	}
-	if len(got.Requested.Paths) != 1 || got.Requested.Paths[0] != "ssh" {
-		t.Fatalf("paths: %v", got.Requested.Paths)
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != ExitUsage {
+		t.Fatalf("expected ExitUsage, got %v", err)
+	}
+	joined := strings.Join(fake.Lines, "\n")
+	if !strings.Contains(joined, "not enrolled yet; enrolling this machine") {
+		t.Fatalf("missing enrollment banner: %v", fake.Lines)
 	}
 }

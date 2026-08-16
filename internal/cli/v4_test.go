@@ -38,9 +38,7 @@ func TestV2EnrollRequestApproveGet(t *testing.T) {
 	clientBase := t.TempDir()
 	clientFake := &ui.Fake{}
 	clientApp := &app.App{UI: clientFake, Home: clientBase}
-	if err := runEnroll(context.Background(), clientApp, &enrollFlags{
-		requests: []string{"cloud/vendor"}, name: "v2machine", remote: remoteURL, yes: true,
-	}); err != nil {
+	if err := runRequest(context.Background(), clientApp, []string{"cloud/vendor"}, &requestFlags{name: "v2machine", remote: remoteURL, yes: true}); err != nil {
 		t.Fatalf("v2 enroll: %v", err)
 	}
 	joined := strings.Join(clientFake.Lines, "\n")
@@ -71,7 +69,7 @@ func TestV2EnrollRequestApproveGet(t *testing.T) {
 		t.Fatalf("content = %q, want %q", out, content)
 	}
 
-	if err := runVerify(context.Background(), clientApp, true, false); err != nil {
+	if err := runVerify(context.Background(), clientApp, false); err != nil {
 		t.Fatalf("client verify: %v", err)
 	}
 }
@@ -90,9 +88,7 @@ func TestV2RequestAfterEnrollment(t *testing.T) {
 	clientBase := t.TempDir()
 	clientFake := &ui.Fake{}
 	clientApp := &app.App{UI: clientFake, Home: clientBase}
-	if err := runEnroll(context.Background(), clientApp, &enrollFlags{
-		requests: []string{"cloud/vendor"}, name: "requester", remote: remoteURL, yes: true,
-	}); err != nil {
+	if err := runRequest(context.Background(), clientApp, []string{"cloud/vendor"}, &requestFlags{name: "requester", remote: remoteURL, yes: true}); err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
 	if err := runApprove(context.Background(), fx.app, &approveFlags{all: true, yes: true}); err != nil {
@@ -100,7 +96,7 @@ func TestV2RequestAfterEnrollment(t *testing.T) {
 	}
 
 	clientFake.Lines = nil
-	if err := runRequest(context.Background(), clientApp, "other/area", "", true); err != nil {
+	if err := runRequest(context.Background(), clientApp, []string{"other/area"}, &requestFlags{yes: true}); err != nil {
 		t.Fatalf("request: %v", err)
 	}
 	if !strings.Contains(strings.Join(clientFake.Lines, "\n"), "created access request rq_") {
@@ -180,9 +176,7 @@ func TestV2ApproveRefusesRecipientRebind(t *testing.T) {
 
 	clientBase := t.TempDir()
 	clientApp := &app.App{UI: &ui.Fake{}, Home: clientBase}
-	if err := runEnroll(context.Background(), clientApp, &enrollFlags{
-		requests: []string{"cloud/vendor"}, name: "victim", remote: remoteURL, yes: true,
-	}); err != nil {
+	if err := runRequest(context.Background(), clientApp, []string{"cloud/vendor"}, &requestFlags{name: "victim", remote: remoteURL, yes: true}); err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
 	if err := runApprove(context.Background(), fx.app, &approveFlags{all: true, yes: true}); err != nil {
@@ -197,9 +191,7 @@ func TestV2ApproveRefusesRecipientRebind(t *testing.T) {
 
 	attackerBase := t.TempDir()
 	attackerApp := &app.App{UI: &ui.Fake{}, Home: attackerBase}
-	if err := runEnroll(context.Background(), attackerApp, &enrollFlags{
-		requests: []string{"cloud/vendor"}, name: "attacker", remote: remoteURL, yes: true,
-	}); err != nil {
+	if err := runRequest(context.Background(), attackerApp, []string{"cloud/vendor"}, &requestFlags{name: "attacker", remote: remoteURL, yes: true}); err != nil {
 		t.Fatalf("attacker enroll: %v", err)
 	}
 	attackerHome := config.RoleHome(attackerBase, config.RoleClient)
@@ -213,7 +205,7 @@ func TestV2ApproveRefusesRecipientRebind(t *testing.T) {
 	}
 	fake := &ui.Fake{}
 	attackerApp.UI = fake
-	if err := runRequest(context.Background(), attackerApp, "cloud/vendor", "", true); err != nil {
+	if err := runRequest(context.Background(), attackerApp, []string{"cloud/vendor"}, &requestFlags{yes: true}); err != nil {
 		t.Fatalf("attacker request: %v", err)
 	}
 

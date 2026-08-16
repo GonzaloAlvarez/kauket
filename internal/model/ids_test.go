@@ -14,8 +14,6 @@ func TestIDGenerators(t *testing.T) {
 		{"StoreID", "ks_", NewStoreID},
 		{"HostID", "h_", NewHostID},
 		{"RequestID", "rq_", NewRequestID},
-		{"SecretObjectID", "s_", NewSecretObjectID},
-		{"AdminRecipientID", "ar_", NewAdminRecipientID},
 		{"NodeID", "n_", NewNodeID},
 		{"IndexObjectID", "x_", NewIndexObjectID},
 		{"ObjectID", "o_", NewObjectID},

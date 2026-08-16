@@ -20,7 +20,6 @@ type getFlags struct {
 	stdout bool
 	force  bool
 	backup bool
-	noSync bool
 }
 
 func NewGet(a *app.App) *cobra.Command {
@@ -36,7 +35,6 @@ func NewGet(a *app.App) *cobra.Command {
 	cmd.Flags().BoolVar(&f.stdout, "stdout", false, "print to stdout instead of installing")
 	cmd.Flags().BoolVar(&f.force, "force", false, "overwrite an unmanaged destination file")
 	cmd.Flags().BoolVar(&f.backup, "backup", false, "create a timestamped backup before overwriting")
-	cmd.Flags().BoolVar(&f.noSync, "no-sync", false, "skip the sync step")
 	return cmd
 }
 
@@ -58,10 +56,8 @@ func runGet(ctx context.Context, a *app.App, f *getFlags, secretID string) error
 			if err != nil {
 				return &ExitError{Code: ExitUsage, Err: err}
 			}
-			if !f.noSync {
-				if err := syncAdmin(ctx, a, adminHome); err != nil {
-					return err
-				}
+			if err := syncForRead(ctx, a, config.RoleAdmin, adminHome); err != nil {
+				return err
 			}
 			if err := requireV2StoreDir(config.RepoDir(adminHome)); err != nil {
 				return err
@@ -79,10 +75,8 @@ func runGet(ctx context.Context, a *app.App, f *getFlags, secretID string) error
 		return &ExitError{Code: ExitUsage, Err: err}
 	}
 
-	if !f.noSync {
-		if err := runGetSync(ctx, a, home, cfg, f.stdout); err != nil {
-			return err
-		}
+	if err := syncForRead(ctx, a, config.RoleClient, home); err != nil {
+		return err
 	}
 
 	if err := requireV2StoreDir(config.RepoDir(home)); err != nil {
@@ -141,45 +135,6 @@ func installAWSProfileSecret(a *app.App, home, secretID string, content []byte, 
 	}
 	if !changed {
 		a.UI.Println(fmt.Sprintf("profile %s already current", res.Profile))
-	}
-	return nil
-}
-
-func runGetSync(ctx context.Context, a *app.App, home string, cfg *config.Client, stdoutMode bool) error {
-	remoteURL := selectClientRemote(cfg)
-	if remoteURL == "" {
-		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: stored remote URL is empty")}
-	}
-
-	transport, err := buildGetTransport(home, cfg, remoteURL)
-	if err != nil {
-		return &ExitError{Code: ExitSync, Err: err}
-	}
-
-	now := a.Now
-	if now == nil {
-		now = time.Now
-	}
-	newStore := a.NewStore
-	if newStore == nil {
-		newStore = gitstore.OpenOrClone
-	}
-	store, err := newStore(ctx, gitstore.Config{
-		RepoPath: config.RepoDir(home),
-		URL:      remoteURL,
-		LockPath: config.LockPath(home),
-		Now:      now,
-	}, transport)
-	if err != nil {
-		return &ExitError{Code: ExitSync, Err: err}
-	}
-	defer store.Close()
-
-	if !stdoutMode {
-		a.UI.Println("syncing store")
-	}
-	if err := store.Sync(ctx); err != nil {
-		return &ExitError{Code: ExitSync, Err: err}
 	}
 	return nil
 }

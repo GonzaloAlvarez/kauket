@@ -13,12 +13,12 @@ Encryption is direct [`filippo.io/age`](https://github.com/FiloSottile/age) — 
 ## Quick start
 
 ```sh
-# Admin machine
-kauket init
+# Admin machine (owner defaults to your gh user; repo confirmed interactively)
+kauket init --recovery-out ~/kauket-recovery
 kauket add ssh.main_private_key ~/.ssh/main_private_key.pem
 
-# New machine
-kauket enroll --request ssh
+# New machine: one command — enrolls this machine on first use, then files the request
+kauket request ssh
 
 # Admin machine
 kauket approve
@@ -26,6 +26,8 @@ kauket approve
 # New machine
 kauket get ssh.main_private_key
 ```
+
+Every command syncs with the remote automatically; if the remote is unreachable, read commands fall back to the local store copy with a warning. To pin the store's trust anchor out of band on a new machine, set `KAUKET_ANCHOR=<fingerprint>` before the first `kauket request`.
 
 AWS profiles can be captured and distributed without touching other profiles on the target machine:
 
@@ -42,12 +44,13 @@ kauket get aws.profile.amzn-wanfe
 A machine can hold both roles in one `KAUKET_HOME` (default `~/.config/kauket`). Each role lives in its own subdirectory, and every command picks the role it needs — no environment switching:
 
 ```sh
-kauket init                 # creates <KAUKET_HOME>/admin/
-kauket enroll --request ssh # creates <KAUKET_HOME>/client/ alongside
+kauket init ...             # creates <KAUKET_HOME>/admin/
 kauket add ...              # admin commands use admin/
-kauket get ...              # client commands use client/
+kauket get ...              # client commands use client/ (falls back to admin/)
 kauket status               # shows both roles; --role admin|client narrows
 ```
+
+On a home that already has the admin role, `kauket request <path>` files an access request for the admin identity rather than enrolling a client. Admin homes read secrets directly with `kauket get`, so a client role alongside the admin is unnecessary; an existing `client/` subdirectory (from an older version or moved in from another home) keeps working.
 
 The role-subdirectory layout is the only supported home layout since v2.1.0. A pre-role-homes install that keeps `config.json` at the `KAUKET_HOME` root must be normalized once with `kauket migrate` from the [v2.0.x release](https://github.com/GonzaloAlvarez/kauket/releases/tag/v2.0.0) before upgrading.
 
@@ -60,7 +63,7 @@ v2 replaces the single admin vault and per-host bundles with a tree of namespace
 ```sh
 kauket init --recovery-out ~/kauket-recovery        # found a namespace store (move recovery keys offline)
 kauket add aws.profile.amzn-wanfe ...               # dotted ids are namespace paths
-kauket enroll --request aws/profile                 # a machine requests a namespace path
+kauket request aws/profile                          # a machine asks for a namespace (enrolls itself on first use)
 kauket approve                                       # owner approves; grants the requested namespace and everything under it
 kauket request infra/k8s                             # an enrolled identity asks for more, any time
 kauket grant  i_9d2e neptune/                        # owner grants proactively

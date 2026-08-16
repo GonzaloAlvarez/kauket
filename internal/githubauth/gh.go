@@ -97,6 +97,30 @@ func (p *GHCLIProvider) Token(ctx context.Context, scopes []string) (string, err
 	return tok, nil
 }
 
+func (p *GHCLIProvider) ActiveLogin(ctx context.Context) (string, error) {
+	sh := p.shell()
+	if _, err := sh.LookPath("gh"); err != nil {
+		return "", ErrGHNotInstalled
+	}
+	stdout, stderr, runErr := p.run(ctx, sh, "auth", "status", "--hostname", ghHost)
+	if errors.Is(runErr, ErrGHTimeout) {
+		return "", runErr
+	}
+	combined := append(append([]byte{}, stdout...), stderr...)
+	if runErr != nil {
+		return "", ErrGHNotAuthenticated
+	}
+	accounts, parseErr := parseAuthStatus(combined, ghHost)
+	if parseErr != nil {
+		return "", fmt.Errorf("%w: failed to parse gh auth status output", ErrGHNotAuthenticated)
+	}
+	account, ok := chooseAccount(accounts, p.Account)
+	if !ok || account.Name == "" {
+		return "", ErrGHNotAuthenticated
+	}
+	return account.Name, nil
+}
+
 type ghAccount struct {
 	Name     string
 	Active   bool

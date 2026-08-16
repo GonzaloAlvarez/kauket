@@ -15,20 +15,18 @@ import (
 
 func NewInspect(a *app.App) *cobra.Command {
 	var asIdentity string
-	var noSync bool
 	cmd := &cobra.Command{
 		Use:   "inspect",
 		Short: "Show which secrets an identity can read (admin/owner view)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInspectAs(cmd.Context(), a, asIdentity, noSync)
+			return runInspectAs(cmd.Context(), a, asIdentity)
 		},
 	}
 	cmd.Flags().StringVar(&asIdentity, "as", "", "identity id to evaluate (required)")
-	cmd.Flags().BoolVar(&noSync, "no-sync", false, "do not sync first")
 	return cmd
 }
 
-func runInspectAs(ctx context.Context, a *app.App, asIdentity string, noSync bool) error {
+func runInspectAs(ctx context.Context, a *app.App, asIdentity string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -43,10 +41,8 @@ func runInspectAs(ctx context.Context, a *app.App, asIdentity string, noSync boo
 	if err != nil {
 		return &ExitError{Code: ExitUsage, Err: err}
 	}
-	if !noSync {
-		if err := syncAdmin(ctx, a, home); err != nil {
-			return err
-		}
+	if err := syncForRead(ctx, a, config.RoleAdmin, home); err != nil {
+		return err
 	}
 	if !isV2Store(config.RepoDir(home)) {
 		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: inspect requires a v2 store")}

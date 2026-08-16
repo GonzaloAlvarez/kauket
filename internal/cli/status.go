@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"context"
+
 	"github.com/gonzaloalvarez/kauket/internal/app"
 	"github.com/gonzaloalvarez/kauket/internal/config"
 	"github.com/spf13/cobra"
@@ -12,14 +14,14 @@ func NewStatus(a *app.App) *cobra.Command {
 		Use:   "status",
 		Short: "Print the local kauket status",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runStatus(a, roleFlag)
+			return runStatus(cmd.Context(), a, roleFlag)
 		},
 	}
 	cmd.Flags().StringVar(&roleFlag, "role", "", "limit to one role (admin|client)")
 	return cmd
 }
 
-func runStatus(a *app.App, roleFlag string) error {
+func runStatus(ctx context.Context, a *app.App, roleFlag string) error {
 	targets, err := resolveTargetRoles(a, roleFlag)
 	if err != nil {
 		return err
@@ -31,6 +33,9 @@ func runStatus(a *app.App, roleFlag string) error {
 	for i, t := range targets {
 		if i > 0 {
 			a.UI.Println("")
+		}
+		if err := syncForRead(ctx, a, t.role, t.home); err != nil {
+			return err
 		}
 		if t.role == config.RoleAdmin {
 			err = statusAdmin(a, t.home)

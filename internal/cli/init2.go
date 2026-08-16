@@ -26,12 +26,49 @@ func runInitV2(ctx context.Context, a *app.App, f *initFlags) error {
 	if err != nil {
 		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("kauket: resolve home: %w", err)}
 	}
+
+	owner := strings.TrimSpace(f.owner)
+	repoName := strings.TrimSpace(f.repo)
+	remoteURL := strings.TrimSpace(f.remote)
+	if remoteURL != "" {
+		if (owner == "" || repoName == "") && !strings.HasPrefix(remoteURL, "file://") {
+			inferredOwner, inferredRepo := inferOwnerRepoFromRemote(remoteURL)
+			if owner == "" {
+				owner = inferredOwner
+			}
+			if repoName == "" {
+				repoName = inferredRepo
+			}
+		}
+	} else {
+		if owner == "" {
+			owner, err = detectGitHubOwner(ctx, a)
+			if err != nil {
+				return &ExitError{Code: ExitUsage, Err: errors.New("kauket: could not detect your GitHub user; pass --owner or --remote URL")}
+			}
+			if !f.yes {
+				ok, cerr := a.UI.Confirm(fmt.Sprintf("store repo: %s/%s — ok?", owner, repoName))
+				if cerr != nil {
+					return &ExitError{Code: ExitUsage, Err: cerr}
+				}
+				if !ok {
+					return &ExitError{Code: ExitUsage, Err: errors.New("kauket: pass --owner or --remote URL")}
+				}
+			}
+		}
+		remoteURL = fmt.Sprintf("https://github.com/%s/%s.git", owner, repoName)
+	}
+	useGitHub := strings.HasPrefix(remoteURL, "https://github.com/")
+	if !useGitHub && !strings.HasPrefix(remoteURL, "file://") {
+		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: init supports an HTTPS github.com URL or a local file URL")}
+	}
+
 	if err := config.EnsureIdentitiesDir(home); err != nil {
 		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("kauket: create identities dir: %w", err)}
 	}
 
 	identityPath := config.AdminIdentityPath(home)
-	recipient, err := ensureAdminIdentity(identityPath, f.adminIdentity)
+	recipient, err := ensureAdminIdentity(identityPath)
 	if err != nil {
 		return &ExitError{Code: ExitCrypto, Err: err}
 	}
@@ -45,15 +82,6 @@ func runInitV2(ctx context.Context, a *app.App, f *initFlags) error {
 		return &ExitError{Code: ExitCrypto, Err: err}
 	}
 
-	remoteURL := strings.TrimSpace(f.remote)
-	if remoteURL == "" {
-		remoteURL = fmt.Sprintf("https://github.com/%s/%s.git", f.owner, f.repo)
-	}
-	useGitHub := !f.noGitHub && !strings.HasPrefix(remoteURL, "file://")
-	if useGitHub && (strings.HasPrefix(remoteURL, "git@") || strings.HasPrefix(remoteURL, "ssh://")) {
-		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: admin init does not support SSH remotes; use an HTTPS GitHub URL or pass --no-github with a local file remote")}
-	}
-
 	var transport gitstore.Transport
 	var token string
 	if useGitHub {
@@ -63,7 +91,7 @@ func runInitV2(ctx context.Context, a *app.App, f *initFlags) error {
 		tok, _, authErr := githubauth.Select(ctx, []string{"repo", "admin:public_key"}, githubauth.SelectorOptions{
 			Shell:           a.AuthShell,
 			ClientID:        githubauth.ClientID,
-			Account:         f.owner,
+			Account:         owner,
 			PrintCode:       printCode,
 			HTTPClient:      a.HTTPClient,
 			AllowDeviceFlow: true,
@@ -73,7 +101,7 @@ func runInitV2(ctx context.Context, a *app.App, f *initFlags) error {
 		}
 		token = tok
 		transport = gitstore.HTTPSTokenTransport{Token: token}
-		if err := ensureGitHubRepo(ctx, a.HTTPClient, token, f.owner, f.repo, f.private); err != nil {
+		if err := ensureGitHubRepo(ctx, a.HTTPClient, token, owner, repoName); err != nil {
 			return &ExitError{Code: ExitSync, Err: err}
 		}
 	} else {
@@ -151,7 +179,7 @@ func runInitV2(ctx context.Context, a *app.App, f *initFlags) error {
 	root := manifest.StoreRoot{
 		Schema: manifest.SchemaSealed, Version: 1, StoreID: storeID, CreatedAt: createdAt,
 		Format:     manifest.DefaultStoreFormat(),
-		GitHub:     manifest.StoreGitHub{Owner: f.owner, Repo: f.repo, DefaultBranch: "main"},
+		GitHub:     manifest.StoreGitHub{Owner: owner, Repo: repoName, DefaultBranch: "main"},
 		RootNodeID: rootNodeID,
 		TrustAnchors: []manifest.TrustAnchor{
 			{IID: founderID, SignPubkey: signPub, AgeRecipient: recipient},
@@ -192,7 +220,7 @@ func runInitV2(ctx context.Context, a *app.App, f *initFlags) error {
 		Schema:  config.ConfigSchema,
 		Role:    config.RoleAdmin,
 		StoreID: storeID,
-		Repo:    config.DefaultRepoInfo(f.owner, f.repo),
+		Repo:    config.DefaultRepoInfo(owner, repoName),
 		Admin: config.AdminInfo{
 			RecipientID:  founderID,
 			IdentityPath: filepath.Join("identities", "admin.txt"),
@@ -222,11 +250,11 @@ func runInitV2(ctx context.Context, a *app.App, f *initFlags) error {
 		return &ExitError{Code: ExitUsage, Err: err}
 	}
 
-	a.UI.Println(fmt.Sprintf("initialized kauket v2 store %s/%s", f.owner, f.repo))
+	a.UI.Println(fmt.Sprintf("initialized kauket v2 store %s/%s", owner, repoName))
 	a.UI.Println(fmt.Sprintf("founder identity %s created", founderID))
 	if fpr, ferr := manifest.SignKeyFingerprint(signPub); ferr == nil {
 		a.UI.Println(fmt.Sprintf("store trust-anchor fingerprint: %s", fpr))
-		a.UI.Println("share it out of band; enrollees pin it with: kauket enroll --anchor <fingerprint>")
+		a.UI.Println("share it out of band; clients pin it with: KAUKET_ANCHOR=<fingerprint> kauket request <path>")
 	}
 	a.UI.Println(fmt.Sprintf("recovery key pair written to %s", f.recoveryOut))
 	a.UI.Println("move the recovery keys OFFLINE now; they can decrypt every secret in this store")

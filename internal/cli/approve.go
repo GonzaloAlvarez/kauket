@@ -15,11 +15,10 @@ import (
 )
 
 type approveFlags struct {
-	request       string
-	all           bool
-	yes           bool
-	dryRun        bool
-	enrollUnknown bool
+	request string
+	all     bool
+	yes     bool
+	dryRun  bool
 }
 
 func NewApprove(a *app.App) *cobra.Command {
@@ -35,7 +34,6 @@ func NewApprove(a *app.App) *cobra.Command {
 	cmd.Flags().BoolVar(&f.all, "all", false, "approve all pending requests")
 	cmd.Flags().BoolVar(&f.yes, "yes", false, "noninteractive")
 	cmd.Flags().BoolVar(&f.dryRun, "dry-run", false, "show actions only")
-	cmd.Flags().BoolVar(&f.enrollUnknown, "enroll-unknown", false, "noninteractively enroll not-yet-known identities (adds their read-only deploy key)")
 	return cmd
 }
 

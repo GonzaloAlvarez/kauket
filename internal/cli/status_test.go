@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -18,7 +19,7 @@ func statusLinesWithoutFingerprint(lines []string) []string {
 
 func TestStatusUninitialized(t *testing.T) {
 	a, fake, _ := newTestApp(t)
-	if err := runStatus(a, ""); err != nil {
+	if err := runStatus(context.Background(), a, ""); err != nil {
 		t.Fatalf("runStatus: %v", err)
 	}
 	if len(fake.Lines) != 1 || fake.Lines[0] != "role: uninitialized" {
@@ -28,7 +29,7 @@ func TestStatusUninitialized(t *testing.T) {
 
 func TestStatusAdminAfterInit(t *testing.T) {
 	a, fake, _ := initAdminFixture(t)
-	if err := runStatus(a, ""); err != nil {
+	if err := runStatus(context.Background(), a, ""); err != nil {
 		t.Fatalf("status: %v", err)
 	}
 	wantLines := []string{
@@ -51,7 +52,7 @@ func TestStatusAdminAfterInit(t *testing.T) {
 
 func TestStatusClient(t *testing.T) {
 	fx := setupEnrolledClient(t, "ssh")
-	if err := runStatus(fx.app, ""); err != nil {
+	if err := runStatus(context.Background(), fx.app, ""); err != nil {
 		t.Fatalf("status: %v", err)
 	}
 	wantLines := []string{

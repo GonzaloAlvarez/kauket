@@ -7,75 +7,34 @@ import (
 	"testing"
 )
 
-func TestMarshalCanonicalRoundTripVault(t *testing.T) {
-	v := Vault{
-		Schema:    1,
-		StoreID:   "ks_6me7bk1f9s4xz2qa",
-		CreatedAt: "2026-05-24T00:00:00Z",
-		UpdatedAt: "2026-05-24T00:00:00Z",
-		Admins: []AdminRecipient{
-			{ID: "ar_3m0vq2ks9p8n1c7x", Recipient: "age1aaa", CreatedAt: "2026-05-24T00:00:00Z"},
-			{ID: "ar_bbbbbbbbbbbbbbbb", Recipient: "age1bbb", CreatedAt: "2026-05-24T00:00:00Z"},
+func TestMarshalCanonicalRoundTripNestedDocument(t *testing.T) {
+	v := map[string]any{
+		"schema":     1,
+		"store_id":   "ks_6me7bk1f9s4xz2qa",
+		"created_at": "2026-05-24T00:00:00Z",
+		"admins": []map[string]any{
+			{"id": "ar_3m0vq2ks9p8n1c7x", "recipient": "age1aaa"},
+			{"id": "ar_bbbbbbbbbbbbbbbb", "recipient": "age1bbb"},
 		},
-		Profiles: map[string]Profile{
-			"ssh": {Description: "ssh profile"},
-			"aws": {Description: "aws profile"},
-		},
-		Secrets: map[string]Secret{
-			"ssh.main_private_key": {
-				SecretObjectID: "s_q8x4c9vy2m7k1w0z",
-				Kind:           "file",
-				Profiles:       []string{"ssh"},
-				Install:        InstallSpec{Destination: "~/.ssh/main_private_key", Mode: "0600", DirectoryMode: "0700"},
-				ContentBase64:  "QUFBQQ==",
-				SHA256:         "deadbeef",
-				CreatedAt:      "2026-05-24T00:00:00Z",
-				UpdatedAt:      "2026-05-24T00:00:00Z",
+		"secrets": map[string]any{
+			"ssh.main_private_key": map[string]any{
+				"kind":           "file",
+				"install":        map[string]any{"destination": "~/.ssh/main_private_key", "mode": "0600", "directory_mode": "0700"},
+				"content_base64": "QUFBQQ==",
+				"sha256":         "deadbeef",
 			},
-			"aws.primary_account.key_file": {
-				SecretObjectID: "s_aaaaaaaaaaaaaaaa",
-				Kind:           "file",
-				Profiles:       []string{"aws"},
-				Install:        InstallSpec{Destination: "~/.aws/credentials", Mode: "0600", DirectoryMode: "0700"},
-				ContentBase64:  "QkJCQg==",
-				SHA256:         "cafebabe",
-				CreatedAt:      "2026-05-24T00:00:00Z",
-				UpdatedAt:      "2026-05-24T00:00:00Z",
-			},
-			"cloudflare.dns_api_token": {
-				SecretObjectID: "s_cccccccccccccccc",
-				Kind:           "file",
-				Profiles:       []string{},
-				Install:        InstallSpec{Destination: "~/.cf/token", Mode: "0600", DirectoryMode: "0700"},
-				ContentBase64:  "Q0NDQw==",
-				SHA256:         "feedface",
-				CreatedAt:      "2026-05-24T00:00:00Z",
-				UpdatedAt:      "2026-05-24T00:00:00Z",
+			"aws.primary_account.key_file": map[string]any{
+				"kind":           "file",
+				"install":        map[string]any{"destination": "~/.aws/credentials", "mode": "0600", "directory_mode": "0700"},
+				"content_base64": "QkJCQg==",
+				"sha256":         "cafebabe",
 			},
 		},
-		Hosts: map[string]Host{
-			"h_7j4v6m2q9xk3p8da": {
-				DisplayName:          "machine2",
-				ReportedHostname:     "r730xd-debian",
-				AgeRecipient:         "age1host",
-				DeployKeyFingerprint: "SHA256:xxx",
-				GrantedProfiles:      []string{"ssh"},
-				GrantedSecrets:       []string{},
-				CreatedAt:            "2026-05-24T00:00:00Z",
-				ApprovedAt:           "2026-05-24T00:00:00Z",
-			},
-			"h_b2n8w5s6c1t9qq0r": {
-				DisplayName:          "machine3",
-				ReportedHostname:     "kaiser",
-				AgeRecipient:         "age1host2",
-				DeployKeyFingerprint: "SHA256:yyy",
-				GrantedProfiles:      []string{"aws"},
-				GrantedSecrets:       []string{},
-				CreatedAt:            "2026-05-24T00:00:00Z",
-				ApprovedAt:           "2026-05-24T00:00:00Z",
-			},
+		"hosts": map[string]any{
+			"h_7j4v6m2q9xk3p8da": map[string]any{"display_name": "machine2", "age_recipient": "age1host", "granted": []string{"ssh"}},
+			"h_b2n8w5s6c1t9qq0r": map[string]any{"display_name": "machine3", "age_recipient": "age1host2", "granted": []string{"aws"}},
 		},
-		Requests: map[string]RequestRecord{},
+		"requests": map[string]any{},
 	}
 
 	first, err := MarshalCanonical(v)

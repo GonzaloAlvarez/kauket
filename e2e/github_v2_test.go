@@ -58,7 +58,7 @@ func TestGitHubV2InitJourney(t *testing.T) {
 	recoveryOut := filepath.Join(root, "recovery")
 
 	res := runKauket(t, bin, kauketHome, home, "init", "--recovery-out", recoveryOut,
-		"--owner", owner, "--repo", repo, "--private", "--yes")
+		"--owner", owner, "--repo", repo, "--yes")
 	if res.err != nil {
 		t.Fatalf("init: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -99,7 +99,7 @@ func TestGitHubWriteJourney(t *testing.T) {
 	mustMkdir(t, adminHome, 0o700)
 	mustMkdir(t, clientHome, 0o700)
 
-	res := runKauket(t, bin, adminKauket, adminHome, "init", "--owner", owner, "--repo", repo, "--private", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
+	res := runKauket(t, bin, adminKauket, adminHome, "init", "--owner", owner, "--repo", repo, "--recovery-out", filepath.Join(root, "recovery"), "--yes")
 	if res.err != nil {
 		t.Fatalf("init: %v\nstderr:%s", res.err, res.stderr)
 	}
@@ -112,7 +112,7 @@ func TestGitHubWriteJourney(t *testing.T) {
 	if res.err != nil {
 		t.Fatalf("add: %v\nstderr:%s", res.err, res.stderr)
 	}
-	res = runKauket(t, bin, clientKauket, clientHome, "enroll", "--repo", repoSlug, "--request", "ssh", "--name", randomEnrollName(), "--yes")
+	res = runKauket(t, bin, clientKauket, clientHome, "request", "ssh", "--repo", repoSlug, "--name", randomEnrollName(), "--yes")
 	if res.err != nil {
 		t.Fatalf("enroll: %v\nstderr:%s", res.err, res.stderr)
 	}
@@ -181,7 +181,7 @@ func TestGitHubRequestJourney(t *testing.T) {
 	mustMkdir(t, clientHome, 0o700)
 
 	res := runKauket(t, bin, founderKauket, founderHome, "init", "--recovery-out", filepath.Join(root, "recovery"),
-		"--owner", owner, "--repo", repo, "--private", "--yes")
+		"--owner", owner, "--repo", repo, "--yes")
 	if res.err != nil {
 		t.Fatalf("init: %v\nstderr:%s", res.err, res.stderr)
 	}
@@ -203,7 +203,7 @@ func TestGitHubRequestJourney(t *testing.T) {
 		t.Fatalf("add second: %v\nstderr:%s", res.err, res.stderr)
 	}
 
-	res = runKauket(t, bin, clientKauket, clientHome, "enroll", "--repo", repoSlug, "--request", "cloud/vendor", "--name", randomEnrollName(), "--yes")
+	res = runKauket(t, bin, clientKauket, clientHome, "request", "cloud/vendor", "--repo", repoSlug, "--name", randomEnrollName(), "--yes")
 	if res.err != nil {
 		t.Fatalf("v2 enroll: %v\nstderr:%s", res.err, res.stderr)
 	}
@@ -237,7 +237,7 @@ func TestGitHubRequestJourney(t *testing.T) {
 	if res.err != nil || res.stdout != "FIRST SECRET" {
 		t.Fatalf("client get: err=%v out=%q stderr=%s", res.err, res.stdout, res.stderr)
 	}
-	res = runKauket(t, bin, clientKauket, clientHome, "get", "other.area.second_secret", "--stdout", "--no-sync")
+	res = runKauket(t, bin, clientKauket, clientHome, "get", "other.area.second_secret", "--stdout")
 	if res.err == nil || exitCodeOf(res.err) != 5 {
 		t.Fatalf("unrequested secret should exit 5, got %v", res.err)
 	}
@@ -257,7 +257,7 @@ func TestGitHubRequestJourney(t *testing.T) {
 	if res.err != nil || res.stdout != "SECOND SECRET" {
 		t.Fatalf("post-request get: err=%v out=%q stderr=%s", res.err, res.stdout, res.stderr)
 	}
-	res = runKauket(t, bin, clientKauket, clientHome, "verify", "--no-sync")
+	res = runKauket(t, bin, clientKauket, clientHome, "verify")
 	if res.err != nil {
 		t.Fatalf("client verify: %v\nstderr:%s", res.err, res.stderr)
 	}
@@ -286,7 +286,7 @@ func TestGitHubMultiOwnerJourney(t *testing.T) {
 	mustMkdir(t, clientHome, 0o700)
 
 	res := runKauket(t, bin, founderKauket, founderHome, "init", "--recovery-out", filepath.Join(root, "recovery"),
-		"--owner", owner, "--repo", repo, "--private", "--yes")
+		"--owner", owner, "--repo", repo, "--yes")
 	if res.err != nil {
 		t.Fatalf("init: %v\nstderr:%s", res.err, res.stderr)
 	}
@@ -329,7 +329,7 @@ func TestGitHubMultiOwnerJourney(t *testing.T) {
 		t.Fatalf("grant --owner: %v\nstderr:%s", res.err, res.stderr)
 	}
 
-	res = runKauket(t, bin, clientKauket, clientHome, "enroll", "--repo", repoSlug, "--request", "cloud/vendor", "--name", randomEnrollName(), "--yes")
+	res = runKauket(t, bin, clientKauket, clientHome, "request", "cloud/vendor", "--repo", repoSlug, "--name", randomEnrollName(), "--yes")
 	if res.err != nil {
 		t.Fatalf("enroll: %v\nstderr:%s", res.err, res.stderr)
 	}
@@ -385,7 +385,7 @@ func TestGitHubRescueJourney(t *testing.T) {
 	recoveryOut := filepath.Join(root, "recovery")
 
 	res := runKauket(t, bin, founderKauket, founderHome, "init", "--recovery-out", recoveryOut,
-		"--owner", owner, "--repo", repo, "--private", "--yes")
+		"--owner", owner, "--repo", repo, "--yes")
 	if res.err != nil {
 		t.Fatalf("init: %v\nstderr:%s", res.err, res.stderr)
 	}

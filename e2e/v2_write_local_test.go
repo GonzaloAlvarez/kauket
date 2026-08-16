@@ -24,7 +24,7 @@ func TestV2WriteLocalE2E(t *testing.T) {
 	mustMkdir(t, clientHome, 0o700)
 	remoteURL := setupBareRemote(t, bareDir)
 
-	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
+	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--recovery-out", filepath.Join(root, "recovery"), "--yes")
 	if res.err != nil {
 		t.Fatalf("init: %v\nstderr:%s", res.err, res.stderr)
 	}
@@ -37,7 +37,7 @@ func TestV2WriteLocalE2E(t *testing.T) {
 	if res.err != nil {
 		t.Fatalf("ssh add: %v\nstderr:%s", res.err, res.stderr)
 	}
-	res = runKauket(t, bin, clientKauket, clientHome, "enroll", "--remote", remoteURL, "--request", "ssh", "--name", "writer-client", "--yes")
+	res = runKauket(t, bin, clientKauket, clientHome, "request", "ssh", "--remote", remoteURL, "--name", "writer-client", "--yes")
 	if res.err != nil {
 		t.Fatalf("enroll: %v\nstderr:%s", res.err, res.stderr)
 	}

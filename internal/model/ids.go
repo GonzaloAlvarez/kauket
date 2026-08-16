@@ -27,14 +27,6 @@ func NewRequestID() string {
 	return randomID("rq_")
 }
 
-func NewSecretObjectID() string {
-	return randomID("s_")
-}
-
-func NewAdminRecipientID() string {
-	return randomID("ar_")
-}
-
 func NewNodeID() string {
 	return randomID("n_")
 }

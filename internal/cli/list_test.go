@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/gonzaloalvarez/kauket/internal/config"
@@ -24,7 +23,7 @@ func TestListAdminOutput(t *testing.T) {
 	}
 	fake.Lines = nil
 
-	if err := runList(a, ""); err != nil {
+	if err := runList(context.Background(), a, ""); err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	if len(fake.Lines) != 2 {
@@ -43,7 +42,7 @@ func TestListAdminOutput(t *testing.T) {
 
 func TestListAdminEmpty(t *testing.T) {
 	a, fake, _ := initAdminFixture(t)
-	if err := runList(a, ""); err != nil {
+	if err := runList(context.Background(), a, ""); err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	if len(fake.Lines) != 0 {
@@ -63,30 +62,27 @@ func TestListClientNoStoreClone(t *testing.T) {
 			DisplayName:  "listtest",
 			IdentityPath: filepath.Join("identities", "host.txt"),
 		},
-		Repo: config.DefaultRepoInfo("GonzaloAlvarez", "kauket-store"),
+		Repo: config.RepoInfo{RemoteHTTPS: "file:///nonexistent-kauket-remote"},
 	}
 	if err := config.SaveClient(clientHome, clientCfg); err != nil {
 		t.Fatalf("save client: %v", err)
 	}
-	err := runList(a, "")
+	err := runList(context.Background(), a, "")
 	if err == nil {
-		t.Fatalf("expected error when no store clone present")
+		t.Fatalf("expected error when no store clone present and remote unreachable")
 	}
 	var exitErr *ExitError
 	if !errors.As(err, &exitErr) {
 		t.Fatalf("expected ExitError, got %T", err)
 	}
-	if exitErr.Code != ExitUsage {
-		t.Fatalf("expected ExitUsage=%d, got %d", ExitUsage, exitErr.Code)
-	}
-	if !strings.Contains(err.Error(), "kauket sync") {
-		t.Fatalf("expected sync-first hint, got %q", err.Error())
+	if exitErr.Code != ExitSync {
+		t.Fatalf("expected ExitSync=%d, got %d", ExitSync, exitErr.Code)
 	}
 }
 
 func TestListUninitialized(t *testing.T) {
 	a, _, _ := newTestApp(t)
-	err := runList(a, "")
+	err := runList(context.Background(), a, "")
 	if err == nil {
 		t.Fatalf("expected error when uninitialized")
 	}

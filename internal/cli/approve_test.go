@@ -30,13 +30,7 @@ import (
 func enrollClientHome(t *testing.T, bareURL, name string) (clientBase string, clientHome string, requestID string) {
 	t.Helper()
 	a, fake, home := newTestApp(t)
-	flags := &enrollFlags{
-		requests: []string{"ssh"},
-		name:     name,
-		remote:   bareURL,
-		yes:      true,
-	}
-	if err := runEnroll(context.Background(), a, flags); err != nil {
+	if err := runRequest(context.Background(), a, []string{"ssh"}, &requestFlags{name: name, remote: bareURL, yes: true}); err != nil {
 		t.Fatalf("enroll %s: %v", name, err)
 	}
 	for _, line := range fake.Lines {

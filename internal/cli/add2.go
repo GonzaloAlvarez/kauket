@@ -18,9 +18,6 @@ func runAddV2(ctx context.Context, a *app.App, home string, cfg *config.Admin, f
 	if err != nil {
 		return &ExitError{Code: ExitUsage, Err: err}
 	}
-	if len(f.profiles) > 0 {
-		a.UI.Println("warning: --profile is ignored on v2 stores; use 'kauket grant' for access control")
-	}
 	sum := sha256.Sum256(content)
 	obj := &manifest.Object{
 		Kind:          kind,

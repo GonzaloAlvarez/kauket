@@ -37,7 +37,7 @@ func collectRequestRefs(t *testing.T, bareDir string) []string {
 	return out
 }
 
-func TestEnrollLocalE2E(t *testing.T) {
+func TestRequestLocalE2E(t *testing.T) {
 	bin := buildBinary(t)
 
 	root := t.TempDir()
@@ -55,12 +55,12 @@ func TestEnrollLocalE2E(t *testing.T) {
 	}
 	remoteURL := setupBareRemote(t, bareDir)
 
-	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
+	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--recovery-out", filepath.Join(root, "recovery"), "--yes")
 	if res.err != nil {
 		t.Fatalf("admin init failed: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
 
-	res = runKauket(t, bin, clientKauket, clientHome, "enroll", "--remote", remoteURL, "--request", "ssh", "--name", "machine2", "--yes")
+	res = runKauket(t, bin, clientKauket, clientHome, "request", "ssh", "--remote", remoteURL, "--name", "machine2", "--yes")
 	if res.err != nil {
 		t.Fatalf("enroll failed: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -152,7 +152,7 @@ func TestEnrollLocalE2E(t *testing.T) {
 	}
 }
 
-func TestEnrollLocalE2EOnAdminHomeCreatesClientRole(t *testing.T) {
+func TestRequestLocalE2EOnAdminHomeFilesAccessRequest(t *testing.T) {
 	bin := buildBinary(t)
 
 	root := t.TempDir()
@@ -164,36 +164,36 @@ func TestEnrollLocalE2EOnAdminHomeCreatesClientRole(t *testing.T) {
 	}
 	remoteURL := setupBareRemote(t, bareDir)
 
-	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
+	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--recovery-out", filepath.Join(root, "recovery"), "--yes")
 	if res.err != nil {
 		t.Fatalf("admin init failed: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
 
-	res = runKauket(t, bin, adminKauket, adminHome, "enroll", "--remote", remoteURL, "--request", "ssh", "--name", "dualhost", "--yes")
+	res = runKauket(t, bin, adminKauket, adminHome, "request", "cloud/vendor", "--yes")
 	if res.err != nil {
-		t.Fatalf("enroll on admin home failed: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
+		t.Fatalf("request on admin home failed: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
+	}
+	if !strings.Contains(res.stdout, "created access request rq_") {
+		t.Fatalf("expected access request, got: %q", res.stdout)
 	}
 
-	if _, err := os.Stat(filepath.Join(adminKauket, "client", "config.json")); err != nil {
-		t.Fatalf("client role config missing: %v", err)
+	if _, err := os.Stat(filepath.Join(adminKauket, "client", "config.json")); err == nil {
+		t.Fatalf("request on admin home must not create a client role")
 	}
 	if _, err := os.Stat(filepath.Join(adminKauket, "admin", "config.json")); err != nil {
 		t.Fatalf("admin role config missing: %v", err)
 	}
 
-	res = runKauket(t, bin, adminKauket, adminHome, "sync")
-	if res.err != nil {
-		t.Fatalf("sync failed: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
-	}
-	if !strings.Contains(res.stdout, "synced admin") || !strings.Contains(res.stdout, "synced client") {
-		t.Fatalf("sync should report both roles, got: %q", res.stdout)
+	refs := collectRequestRefs(t, bareDir)
+	if len(refs) != 1 {
+		t.Fatalf("expected 1 request branch on bare, got %v", refs)
 	}
 
 	res = runKauket(t, bin, adminKauket, adminHome, "status")
 	if res.err != nil {
 		t.Fatalf("status failed: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
-	if !strings.Contains(res.stdout, "role: admin") || !strings.Contains(res.stdout, "role: client") {
-		t.Fatalf("status should show both roles, got: %q", res.stdout)
+	if !strings.Contains(res.stdout, "role: admin") {
+		t.Fatalf("status should show the admin role, got: %q", res.stdout)
 	}
 }

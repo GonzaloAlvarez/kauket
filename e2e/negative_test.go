@@ -24,7 +24,7 @@ func TestNegativeUnapprovedMachineCannotGetSecret(t *testing.T) {
 	mustMkdir(t, clientHome, 0o700)
 	remoteURL := setupBareRemote(t, bareDir)
 
-	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
+	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--recovery-out", filepath.Join(root, "recovery"), "--yes")
 	if res.err != nil {
 		t.Fatalf("admin init: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -36,7 +36,7 @@ func TestNegativeUnapprovedMachineCannotGetSecret(t *testing.T) {
 		t.Fatalf("admin add: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
 
-	res = runKauket(t, bin, clientKauket, clientHome, "enroll", "--remote", remoteURL, "--request", "ssh", "--name", "machine2", "--yes")
+	res = runKauket(t, bin, clientKauket, clientHome, "request", "ssh", "--remote", remoteURL, "--name", "machine2", "--yes")
 	if res.err != nil {
 		t.Fatalf("enroll: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -72,7 +72,7 @@ func TestNegativeExistingUnmanagedFile(t *testing.T) {
 	mustMkdir(t, clientHome, 0o700)
 	remoteURL := setupBareRemote(t, bareDir)
 
-	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
+	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--recovery-out", filepath.Join(root, "recovery"), "--yes")
 	if res.err != nil {
 		t.Fatalf("admin init: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -84,7 +84,7 @@ func TestNegativeExistingUnmanagedFile(t *testing.T) {
 		t.Fatalf("admin add: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
 
-	res = runKauket(t, bin, clientKauket, clientHome, "enroll", "--remote", remoteURL, "--request", "ssh", "--name", "machine2", "--yes")
+	res = runKauket(t, bin, clientKauket, clientHome, "request", "ssh", "--remote", remoteURL, "--name", "machine2", "--yes")
 	if res.err != nil {
 		t.Fatalf("enroll: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -182,7 +182,7 @@ func TestNegativeSymlinkDestination(t *testing.T) {
 	mustMkdir(t, clientHome, 0o700)
 	remoteURL := setupBareRemote(t, bareDir)
 
-	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
+	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--recovery-out", filepath.Join(root, "recovery"), "--yes")
 	if res.err != nil {
 		t.Fatalf("admin init: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -194,7 +194,7 @@ func TestNegativeSymlinkDestination(t *testing.T) {
 		t.Fatalf("admin add: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
 
-	res = runKauket(t, bin, clientKauket, clientHome, "enroll", "--remote", remoteURL, "--request", "ssh", "--name", "machine2", "--yes")
+	res = runKauket(t, bin, clientKauket, clientHome, "request", "ssh", "--remote", remoteURL, "--name", "machine2", "--yes")
 	if res.err != nil {
 		t.Fatalf("enroll: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -249,7 +249,7 @@ func TestNegativeCorruptObject(t *testing.T) {
 	mustMkdir(t, clientHome, 0o700)
 	remoteURL := setupBareRemote(t, bareDir)
 
-	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
+	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--recovery-out", filepath.Join(root, "recovery"), "--yes")
 	if res.err != nil {
 		t.Fatalf("admin init: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -261,7 +261,7 @@ func TestNegativeCorruptObject(t *testing.T) {
 		t.Fatalf("admin add: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
 
-	res = runKauket(t, bin, clientKauket, clientHome, "enroll", "--remote", remoteURL, "--request", "ssh", "--name", "machine2", "--yes")
+	res = runKauket(t, bin, clientKauket, clientHome, "request", "ssh", "--remote", remoteURL, "--name", "machine2", "--yes")
 	if res.err != nil {
 		t.Fatalf("enroll: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -312,8 +312,11 @@ func TestNegativeCorruptObject(t *testing.T) {
 	if !corrupted {
 		t.Fatalf("no secret object found to corrupt; entries: %v", entries)
 	}
+	if err := os.Rename(bareDir, bareDir+".gone"); err != nil {
+		t.Fatalf("break remote so auto-sync cannot restore the corrupt object: %v", err)
+	}
 
-	res = runKauket(t, bin, clientKauket, clientHome, "get", "ssh.main_private_key", "--no-sync")
+	res = runKauket(t, bin, clientKauket, clientHome, "get", "ssh.main_private_key")
 	if res.err == nil {
 		t.Fatalf("expected get on corrupt object to fail; stdout:%s stderr:%s", res.stdout, res.stderr)
 	}

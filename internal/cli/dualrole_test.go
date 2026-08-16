@@ -28,43 +28,24 @@ func setupDualRoleHome(t *testing.T) (*app.App, *ui.Fake, string, []byte) {
 		t.Fatalf("add in admin home: %v", err)
 	}
 
-	flags := &enrollFlags{requests: []string{"ssh"}, name: "dualhost", remote: bareURL, yes: true}
-	if err := runEnroll(context.Background(), a, flags); err != nil {
-		t.Fatalf("enroll in admin home: %v", err)
+	clientTmp := t.TempDir()
+	clientApp := &app.App{UI: &ui.Fake{}, Home: clientTmp}
+	if err := runRequest(context.Background(), clientApp, []string{"ssh"}, &requestFlags{name: "dualhost", remote: bareURL, yes: true}); err != nil {
+		t.Fatalf("enroll client: %v", err)
 	}
 	if err := runApprove(context.Background(), a, &approveFlags{all: true, yes: true}); err != nil {
 		t.Fatalf("approve in admin home: %v", err)
 	}
-	if err := runSync(context.Background(), a, ""); err != nil {
-		t.Fatalf("sync both roles: %v", err)
+	if err := os.Rename(config.RoleHome(clientTmp, config.RoleClient), config.RoleHome(base, config.RoleClient)); err != nil {
+		t.Fatalf("move client role into admin base: %v", err)
 	}
 	fake.Lines = nil
 	return a, fake, base, keyContent
 }
 
-func TestDualRoleSyncSyncsBothRoles(t *testing.T) {
-	a, fake, _, _ := setupDualRoleHome(t)
-	if err := runSync(context.Background(), a, ""); err != nil {
-		t.Fatalf("sync: %v", err)
-	}
-	if len(fake.Lines) != 2 || fake.Lines[0] != "synced admin" || fake.Lines[1] != "synced client" {
-		t.Fatalf("want [synced admin, synced client], got %v", fake.Lines)
-	}
-}
-
-func TestDualRoleSyncRoleFlagNarrows(t *testing.T) {
-	a, fake, _, _ := setupDualRoleHome(t)
-	if err := runSync(context.Background(), a, "admin"); err != nil {
-		t.Fatalf("sync --role admin: %v", err)
-	}
-	if len(fake.Lines) != 1 || fake.Lines[0] != "synced" {
-		t.Fatalf("want [synced], got %v", fake.Lines)
-	}
-}
-
 func TestDualRoleStatusShowsBothSections(t *testing.T) {
 	a, fake, _, _ := setupDualRoleHome(t)
-	if err := runStatus(a, ""); err != nil {
+	if err := runStatus(context.Background(), a, ""); err != nil {
 		t.Fatalf("status: %v", err)
 	}
 	lines := statusLinesWithoutFingerprint(fake.Lines)
@@ -100,7 +81,7 @@ func TestDualRoleFullWorkflow(t *testing.T) {
 	}
 	fake.Lines = nil
 
-	if err := runList(a, ""); err != nil {
+	if err := runList(context.Background(), a, ""); err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	wantLines := []string{
@@ -120,7 +101,7 @@ func TestDualRoleFullWorkflow(t *testing.T) {
 	}
 
 	fake.Lines = nil
-	if err := runList(a, "client"); err != nil {
+	if err := runList(context.Background(), a, "client"); err != nil {
 		t.Fatalf("list --role client: %v", err)
 	}
 	if len(fake.Lines) != 1 || fake.Lines[0] != "ssh.main_private_key" {
@@ -132,17 +113,14 @@ func TestDualRoleReverseOrderEnrollThenInit(t *testing.T) {
 	_, _, storeURL := setupAdminStore(t)
 
 	a, _, base := newTestApp(t)
-	enrollFlagsV := &enrollFlags{requests: []string{"ssh"}, name: "machine2", remote: storeURL, yes: true}
-	if err := runEnroll(context.Background(), a, enrollFlagsV); err != nil {
+	if err := runRequest(context.Background(), a, []string{"ssh"}, &requestFlags{name: "machine2", remote: storeURL, yes: true}); err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
 
 	initFlagsV := &initFlags{
 		owner:       "GonzaloAlvarez",
 		repo:        "kauket-store",
-		private:     true,
 		remote:      bareRepo(t),
-		noGitHub:    true,
 		yes:         true,
 		recoveryOut: filepath.Join(t.TempDir(), "recovery"),
 	}
@@ -160,7 +138,7 @@ func TestDualRoleReverseOrderEnrollThenInit(t *testing.T) {
 
 func TestRoleFlagInvalidValue(t *testing.T) {
 	a, _, _, _ := setupDualRoleHome(t)
-	err := runSync(context.Background(), a, "bogus")
+	err := runList(context.Background(), a, "bogus")
 	if err == nil {
 		t.Fatalf("expected error for invalid --role")
 	}
@@ -175,7 +153,7 @@ func TestRoleFlagInvalidValue(t *testing.T) {
 
 func TestRoleFlagUninstalledRole(t *testing.T) {
 	a, _, _ := initAdminFixture(t)
-	err := runSync(context.Background(), a, "client")
+	err := runList(context.Background(), a, "client")
 	if err == nil {
 		t.Fatalf("expected error for uninstalled role")
 	}
@@ -183,7 +161,7 @@ func TestRoleFlagUninstalledRole(t *testing.T) {
 	if !errors.As(err, &exitErr) || exitErr.Code != ExitUsage {
 		t.Fatalf("expected ExitUsage, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "client role is not configured") || !strings.Contains(err.Error(), "kauket enroll") {
+	if !strings.Contains(err.Error(), "client role is not configured") || !strings.Contains(err.Error(), "kauket request") {
 		t.Fatalf("expected uninstalled-role hint, got %q", err.Error())
 	}
 }

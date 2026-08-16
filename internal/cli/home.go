@@ -48,7 +48,7 @@ func createHint(role config.Role) string {
 	if role == config.RoleAdmin {
 		return "kauket init"
 	}
-	return "kauket enroll"
+	return "kauket request <path>"
 }
 
 func otherRole(role config.Role) config.Role {

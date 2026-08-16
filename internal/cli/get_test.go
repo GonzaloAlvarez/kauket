@@ -58,15 +58,13 @@ func setupEnrolledClient(t *testing.T, requestPath string) *clientFixture {
 	kauketBase := filepath.Join(tempHome, ".config", "kauket")
 	fake := &ui.Fake{}
 	clientApp := &app.App{UI: fake, Home: kauketBase}
-	if err := runEnroll(context.Background(), clientApp, &enrollFlags{
-		requests: []string{requestPath}, name: "machine2", remote: bareURL, yes: true,
-	}); err != nil {
+	if err := runRequest(context.Background(), clientApp, []string{requestPath}, &requestFlags{name: "machine2", remote: bareURL, yes: true}); err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
 	if err := runApprove(context.Background(), adminFx.app, &approveFlags{all: true, yes: true}); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
-	if err := runSync(context.Background(), clientApp, ""); err != nil {
+	if err := syncClient(context.Background(), clientApp, config.RoleHome(kauketBase, config.RoleClient)); err != nil {
 		t.Fatalf("client sync: %v", err)
 	}
 	adminFx.fake.Lines = nil
@@ -130,14 +128,11 @@ func TestGetCreatesFile(t *testing.T) {
 	if err := runGet(context.Background(), fx.app, flags, testSecretID); err != nil {
 		t.Fatalf("runGet: %v", err)
 	}
-	if len(fx.fake.Lines) != 2 {
-		t.Fatalf("expected 2 output lines, got %v", fx.fake.Lines)
+	if len(fx.fake.Lines) != 1 {
+		t.Fatalf("expected 1 output line, got %v", fx.fake.Lines)
 	}
-	if fx.fake.Lines[0] != "syncing store" {
-		t.Fatalf("first line %q, want %q", fx.fake.Lines[0], "syncing store")
-	}
-	if fx.fake.Lines[1] != "creating "+fx.dest {
-		t.Fatalf("second line %q, want %q", fx.fake.Lines[1], "creating "+fx.dest)
+	if fx.fake.Lines[0] != "creating "+fx.dest {
+		t.Fatalf("first line %q, want %q", fx.fake.Lines[0], "creating "+fx.dest)
 	}
 
 	expanded := filepath.Join(fx.tempHome, ".ssh", "main_private_key")
@@ -168,7 +163,7 @@ func TestGetCreatesFile(t *testing.T) {
 
 func TestGetIdempotentNoChange(t *testing.T) {
 	fx := setupEnrolledClient(t, "ssh")
-	flags := &getFlags{noSync: true}
+	flags := &getFlags{}
 	if err := runGet(context.Background(), fx.app, flags, testSecretID); err != nil {
 		t.Fatalf("first runGet: %v", err)
 	}
@@ -200,7 +195,7 @@ func TestGetIdempotentNoChange(t *testing.T) {
 
 func TestGetUnknownNamespaceReturnsExitNotGranted(t *testing.T) {
 	fx := setupEnrolledClient(t, "ssh")
-	flags := &getFlags{noSync: true}
+	flags := &getFlags{}
 	err := runGet(context.Background(), fx.app, flags, "other.unknown_secret")
 	if err == nil {
 		t.Fatalf("expected error on unknown namespace")
@@ -216,7 +211,7 @@ func TestGetUnknownNamespaceReturnsExitNotGranted(t *testing.T) {
 
 func TestGetSecretMissingFromGrantedNamespace(t *testing.T) {
 	fx := setupEnrolledClient(t, "ssh")
-	flags := &getFlags{noSync: true}
+	flags := &getFlags{}
 	err := runGet(context.Background(), fx.app, flags, "ssh.absent_key")
 	if err == nil {
 		t.Fatalf("expected error on missing secret")
@@ -236,7 +231,7 @@ func TestGetSecretMissingFromGrantedNamespace(t *testing.T) {
 func TestGetUngrantedNamespaceReturnsExitNotGranted(t *testing.T) {
 	adminApp, _, _, clientApp, _, _, _ := v2StoreFixture(t)
 	_ = adminApp
-	err := runGet(context.Background(), clientApp, &getFlags{noSync: true, stdout: true}, "aws.profile.amzn-wanfe")
+	err := runGet(context.Background(), clientApp, &getFlags{stdout: true}, "aws.profile.amzn-wanfe")
 	if err == nil {
 		t.Fatalf("expected error on ungranted namespace")
 	}
@@ -254,7 +249,7 @@ func TestGetUngrantedNamespaceReturnsExitNotGranted(t *testing.T) {
 
 func TestGetStdoutMode(t *testing.T) {
 	fx := setupEnrolledClient(t, "ssh")
-	flags := &getFlags{noSync: true, stdout: true}
+	flags := &getFlags{stdout: true}
 	out := captureStdout(t, func() {
 		if err := runGet(context.Background(), fx.app, flags, testSecretID); err != nil {
 			t.Fatalf("runGet: %v", err)
@@ -284,7 +279,7 @@ func TestGetUnmanagedDestinationFailsWithoutForce(t *testing.T) {
 		t.Fatalf("write pre-existing dest: %v", err)
 	}
 
-	flags := &getFlags{noSync: true}
+	flags := &getFlags{}
 	err := runGet(context.Background(), fx.app, flags, testSecretID)
 	if err == nil {
 		t.Fatalf("expected error on unmanaged destination")
@@ -319,7 +314,7 @@ func TestGetUnmanagedDestinationWithBackup(t *testing.T) {
 		t.Fatalf("write pre-existing dest: %v", err)
 	}
 
-	flags := &getFlags{noSync: true, backup: true}
+	flags := &getFlags{backup: true}
 	if err := runGet(context.Background(), fx.app, flags, testSecretID); err != nil {
 		t.Fatalf("runGet with backup: %v", err)
 	}
@@ -366,7 +361,7 @@ func TestGetForceOverwrites(t *testing.T) {
 		t.Fatalf("write pre-existing dest: %v", err)
 	}
 
-	flags := &getFlags{noSync: true, force: true}
+	flags := &getFlags{force: true}
 	if err := runGet(context.Background(), fx.app, flags, testSecretID); err != nil {
 		t.Fatalf("runGet with force: %v", err)
 	}
@@ -394,7 +389,7 @@ func TestGetSymlinkRefused(t *testing.T) {
 		t.Fatalf("create symlink: %v", err)
 	}
 
-	flags := &getFlags{noSync: true}
+	flags := &getFlags{}
 	err := runGet(context.Background(), fx.app, flags, testSecretID)
 	if err == nil {
 		t.Fatalf("expected error on symlink destination")

@@ -52,15 +52,13 @@ func setupClientWithAWSProfile(t *testing.T) *clientFixture {
 	kauketBase := filepath.Join(tempHome, ".config", "kauket")
 	fake := &ui.Fake{}
 	clientApp := &app.App{UI: fake, Home: kauketBase}
-	if err := runEnroll(context.Background(), clientApp, &enrollFlags{
-		requests: []string{"aws/profile"}, name: "machine2", remote: bareURL, yes: true,
-	}); err != nil {
+	if err := runRequest(context.Background(), clientApp, []string{"aws/profile"}, &requestFlags{name: "machine2", remote: bareURL, yes: true}); err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
 	if err := runApprove(context.Background(), adminFx.app, &approveFlags{all: true, yes: true}); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
-	if err := runSync(context.Background(), clientApp, ""); err != nil {
+	if err := syncClient(context.Background(), clientApp, config.RoleHome(kauketBase, config.RoleClient)); err != nil {
 		t.Fatalf("client sync: %v", err)
 	}
 	adminFx.fake.Lines = nil
@@ -87,7 +85,7 @@ func TestGetAWSProfileMergesAlongsideExisting(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	flags := &getFlags{noSync: true}
+	flags := &getFlags{}
 	if err := runGet(context.Background(), fx.app, flags, "aws.profile.amzn-wanfe"); err != nil {
 		t.Fatalf("runGet: %v", err)
 	}
@@ -122,7 +120,7 @@ func TestGetAWSProfileMergesAlongsideExisting(t *testing.T) {
 
 func TestGetAWSProfileAlreadyCurrent(t *testing.T) {
 	fx := setupClientWithAWSProfile(t)
-	flags := &getFlags{noSync: true}
+	flags := &getFlags{}
 	if err := runGet(context.Background(), fx.app, flags, "aws.profile.amzn-wanfe"); err != nil {
 		t.Fatalf("first runGet: %v", err)
 	}
@@ -137,7 +135,7 @@ func TestGetAWSProfileAlreadyCurrent(t *testing.T) {
 
 func TestGetAWSProfileStdout(t *testing.T) {
 	fx := setupClientWithAWSProfile(t)
-	flags := &getFlags{noSync: true, stdout: true}
+	flags := &getFlags{stdout: true}
 	out := captureStdout(t, func() {
 		if err := runGet(context.Background(), fx.app, flags, "aws.profile.amzn-wanfe"); err != nil {
 			t.Fatalf("runGet: %v", err)
@@ -212,8 +210,9 @@ func addRawKindObject(t *testing.T, fx *testAppBundle, secretID, kind string, co
 func TestGetUnsupportedKind(t *testing.T) {
 	fx, _ := initV2Fixture(t)
 	addRawKindObject(t, fx, "weird.thing", "pkcs11", []byte("OPAQUE"))
+	breakStoreRemote(t, config.RoleHome(fx.home, config.RoleAdmin))
 
-	err := runGet(context.Background(), fx.app, &getFlags{noSync: true}, "weird.thing")
+	err := runGet(context.Background(), fx.app, &getFlags{}, "weird.thing")
 	if err == nil {
 		t.Fatalf("expected error for unsupported kind")
 	}
@@ -236,7 +235,7 @@ func TestGetAWSProfileUnmanagedSection(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	flags := &getFlags{noSync: true}
+	flags := &getFlags{}
 	err := runGet(context.Background(), fx.app, flags, "aws.profile.amzn-wanfe")
 	if err == nil {
 		t.Fatalf("expected unmanaged section error")
@@ -250,7 +249,7 @@ func TestGetAWSProfileUnmanagedSection(t *testing.T) {
 	}
 
 	fx.fake.Lines = nil
-	if err := runGet(context.Background(), fx.app, &getFlags{noSync: true, force: true}, "aws.profile.amzn-wanfe"); err != nil {
+	if err := runGet(context.Background(), fx.app, &getFlags{force: true}, "aws.profile.amzn-wanfe"); err != nil {
 		t.Fatalf("forced runGet: %v", err)
 	}
 	creds, err := os.ReadFile(filepath.Join(awsDir, "credentials"))

@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,18 +39,18 @@ func enforceAnchorPin(a *app.App, root *manifest.StoreRoot, expected string) err
 				return nil
 			}
 		}
-		return &ExitError{Code: ExitCrypto, Err: fmt.Errorf("kauket: no trust anchor matches --anchor %q; refusing to pin (store anchors: %s)", expected, strings.Join(fprs, ", "))}
+		return &ExitError{Code: ExitCrypto, Err: fmt.Errorf("kauket: no trust anchor matches the expected anchor %q; refusing to pin (store anchors: %s)", expected, strings.Join(fprs, ", "))}
 	}
 	for _, f := range fprs {
-		a.UI.Println(fmt.Sprintf("warning: trust-on-first-use: pinning store anchor %s (confirm out of band with the store operator, or pass --anchor)", f))
+		a.UI.Println(fmt.Sprintf("warning: trust-on-first-use: pinning store anchor %s (confirm out of band with the store operator, or set KAUKET_ANCHOR)", f))
 	}
 	return nil
 }
 
-func fetchStoreDoc(ctx context.Context, a *app.App, remoteURL string, transport gitstore.Transport, now func() time.Time, expectedAnchor string) (*repoJSON, *manifest.StoreRoot, error) {
+func fetchStoreDoc(ctx context.Context, a *app.App, remoteURL string, transport gitstore.Transport, now func() time.Time, expectedAnchor string) (*manifest.StoreRoot, error) {
 	tempDir, err := os.MkdirTemp("", "kauket-fetch-")
 	if err != nil {
-		return nil, nil, fmt.Errorf("kauket: temp dir: %w", err)
+		return nil, fmt.Errorf("kauket: temp dir: %w", err)
 	}
 	defer os.RemoveAll(tempDir)
 
@@ -70,55 +69,43 @@ func fetchStoreDoc(ctx context.Context, a *app.App, remoteURL string, transport 
 		Now:      now,
 	}, transport)
 	if err != nil {
-		return nil, nil, fmt.Errorf("kauket: open remote for fetch: %w", err)
+		return nil, fmt.Errorf("kauket: open remote for fetch: %w", err)
 	}
 	defer store.Close()
 	if err := store.Sync(ctx); err != nil {
-		return nil, nil, fmt.Errorf("kauket: sync remote: %w", err)
+		return nil, fmt.Errorf("kauket: sync remote: %w", err)
 	}
 
-	if isV2Store(repoPath) {
-		doc, err := os.ReadFile(storeRootPath(repoPath))
-		if err != nil {
-			return nil, nil, fmt.Errorf("kauket: read store.json: %w", err)
-		}
-		sig, err := os.ReadFile(storeRootSigPath(repoPath))
-		if err != nil {
-			return nil, nil, fmt.Errorf("kauket: read store.json.sig: %w", err)
-		}
-		var raw manifest.StoreRoot
-		if err := json.Unmarshal(doc, &raw); err != nil {
-			return nil, nil, fmt.Errorf("kauket: parse store.json: %w", err)
-		}
-		selfKeys := make([]string, 0, len(raw.TrustAnchors)+len(raw.Recovery))
-		for _, t := range raw.TrustAnchors {
-			selfKeys = append(selfKeys, t.SignPubkey)
-		}
-		for _, r := range raw.Recovery {
-			selfKeys = append(selfKeys, r.SignPubkey)
-		}
-		root, _, err := manifest.VerifyStoreRoot(doc, sig, selfKeys, bundle.Ed25519Verifier{})
-		if err != nil {
-			return nil, nil, err
-		}
-		if err := enforceAnchorPin(a, &root, expectedAnchor); err != nil {
-			return nil, nil, err
-		}
-		return nil, &root, nil
+	if !isV2Store(repoPath) {
+		return nil, errors.New("kauket: this remote does not hold a v2 kauket store; migrate legacy v1 stores with the kauket v2.0.x release")
 	}
-
-	data, err := os.ReadFile(filepath.Join(repoPath, "repo.json"))
+	doc, err := os.ReadFile(storeRootPath(repoPath))
 	if err != nil {
-		return nil, nil, fmt.Errorf("kauket: read repo.json: %w", err)
+		return nil, fmt.Errorf("kauket: read store.json: %w", err)
 	}
-	var meta repoJSON
-	if err := json.Unmarshal(data, &meta); err != nil {
-		return nil, nil, fmt.Errorf("kauket: parse repo.json: %w", err)
+	sig, err := os.ReadFile(storeRootSigPath(repoPath))
+	if err != nil {
+		return nil, fmt.Errorf("kauket: read store.json.sig: %w", err)
 	}
-	if meta.Schema == 0 || meta.StoreID == "" {
-		return nil, nil, errors.New("kauket: repo.json present but does not look like a kauket store")
+	var raw manifest.StoreRoot
+	if err := json.Unmarshal(doc, &raw); err != nil {
+		return nil, fmt.Errorf("kauket: parse store.json: %w", err)
 	}
-	return &meta, nil, nil
+	selfKeys := make([]string, 0, len(raw.TrustAnchors)+len(raw.Recovery))
+	for _, t := range raw.TrustAnchors {
+		selfKeys = append(selfKeys, t.SignPubkey)
+	}
+	for _, r := range raw.Recovery {
+		selfKeys = append(selfKeys, r.SignPubkey)
+	}
+	root, _, err := manifest.VerifyStoreRoot(doc, sig, selfKeys, bundle.Ed25519Verifier{})
+	if err != nil {
+		return nil, err
+	}
+	if err := enforceAnchorPin(a, &root, expectedAnchor); err != nil {
+		return nil, err
+	}
+	return &root, nil
 }
 
 func anchorRecipients(root *manifest.StoreRoot) []string {
@@ -150,18 +137,166 @@ func recipientOfIdentityFile(path string) (string, error) {
 	return x.Recipient().String(), nil
 }
 
-func runEnrollV2(ctx context.Context, a *app.App, f *enrollFlags, home string, root *manifest.StoreRoot, hostRecipient, deployPub, remoteURL string, useGitHub bool, transport gitstore.Transport, now func() time.Time, effectiveOwner, effectiveRepo string) error {
+func requestPaths(pathArgs []string, key string) ([]string, error) {
+	if key != "" && len(pathArgs) > 1 {
+		return nil, errors.New("kauket: --key requires a single path")
+	}
 	var paths []string
-	for _, p := range f.requests {
+	for _, p := range pathArgs {
 		segs := splitNodePath(p)
 		if len(segs) == 0 {
 			continue
 		}
+		if key != "" {
+			segs = append(segs, key)
+		}
 		paths = append(paths, strings.Join(segs, "/"))
 	}
 	if len(paths) == 0 {
-		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: at least one --request path is required")}
+		return nil, errors.New("kauket: empty request path")
 	}
+	return paths, nil
+}
+
+func resolveExplicitRemote(repoFlag, remoteFlag string) (string, string, string, bool, error) {
+	remoteFlag = strings.TrimSpace(remoteFlag)
+	if remoteFlag != "" {
+		owner, repoName := splitOwnerRepo(repoFlag)
+		if owner == "" || repoName == "" {
+			owner, repoName = inferOwnerRepoFromRemote(remoteFlag)
+		}
+		if repoName == "" {
+			repoName = defaultRepoName
+		}
+		return owner, repoName, remoteFlag, true, nil
+	}
+	src := strings.TrimSpace(repoFlag)
+	if src == "" {
+		src = strings.TrimSpace(config.EnvRepo())
+	}
+	if src == "" {
+		return "", "", "", false, nil
+	}
+	owner, repoName := splitOwnerRepo(src)
+	if owner == "" || repoName == "" {
+		return "", "", "", false, fmt.Errorf("kauket: invalid owner/repo %q; expected owner/repo", src)
+	}
+	return owner, repoName, fmt.Sprintf("https://github.com/%s/%s.git", owner, repoName), true, nil
+}
+
+func resolveRequestRemote(ctx context.Context, a *app.App, f *requestFlags) (owner, repoName, remoteURL, token string, detected bool, err error) {
+	owner, repoName, remoteURL, explicit, err := resolveExplicitRemote(f.repo, f.remote)
+	if err != nil {
+		return "", "", "", "", false, err
+	}
+	if explicit {
+		return owner, repoName, remoteURL, "", false, nil
+	}
+	owner, err = detectGitHubOwner(ctx, a)
+	if err != nil {
+		tok, _, authErr := githubauth.Select(ctx, []string{"repo"}, githubauth.SelectorOptions{
+			Shell: a.AuthShell, ClientID: githubauth.ClientID,
+			HTTPClient: a.HTTPClient, AllowDeviceFlow: true,
+			PrintCode: func(verifyURL, userCode string) {
+				a.UI.Println(fmt.Sprintf("open %s and enter code %s", verifyURL, userCode))
+			},
+		})
+		if authErr != nil {
+			return "", "", "", "", false, errors.New("kauket: could not detect your GitHub user; pass --repo owner/repo or --remote URL")
+		}
+		owner, err = githubUserLogin(ctx, a.HTTPClient, tok)
+		if err != nil {
+			return "", "", "", "", false, err
+		}
+		token = tok
+	}
+	repoName = defaultRepoName
+	return owner, repoName, fmt.Sprintf("https://github.com/%s/%s.git", owner, repoName), token, true, nil
+}
+
+func autoEnrollRequest(ctx context.Context, a *app.App, pathArgs []string, f *requestFlags) error {
+	home, _, err := resolveRoleHome(a, config.RoleClient)
+	if err != nil {
+		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("kauket: resolve home: %w", err)}
+	}
+	paths, err := requestPaths(pathArgs, f.key)
+	if err != nil {
+		return &ExitError{Code: ExitUsage, Err: err}
+	}
+	owner, repoName, remoteURL, token, detected, err := resolveRequestRemote(ctx, a, f)
+	if err != nil {
+		return &ExitError{Code: ExitUsage, Err: err}
+	}
+	a.UI.Println("not enrolled yet; enrolling this machine")
+	if detected && !f.yes {
+		ok, cerr := a.UI.Confirm(fmt.Sprintf("store repo: %s/%s — ok?", owner, repoName))
+		if cerr != nil {
+			return &ExitError{Code: ExitUsage, Err: cerr}
+		}
+		if !ok {
+			return &ExitError{Code: ExitUsage, Err: errors.New("kauket: pass --repo owner/repo or --remote URL")}
+		}
+	}
+
+	useGitHub := !strings.HasPrefix(remoteURL, "file://")
+	if useGitHub && (strings.HasPrefix(remoteURL, "git@") || strings.HasPrefix(remoteURL, "ssh://")) {
+		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: enrollment does not support SSH remotes; use an HTTPS GitHub URL or a file URL")}
+	}
+
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("kauket: create home: %w", err)}
+	}
+	if err := config.EnsureIdentitiesDir(home); err != nil {
+		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("kauket: create identities dir: %w", err)}
+	}
+	if err := config.EnsureGitDir(home); err != nil {
+		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("kauket: create git dir: %w", err)}
+	}
+	if err := config.EnsureStateDir(home); err != nil {
+		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("kauket: create state dir: %w", err)}
+	}
+
+	hostRecipient, err := ensureHostIdentity(config.HostIdentityPath(home))
+	if err != nil {
+		return &ExitError{Code: ExitCrypto, Err: err}
+	}
+	deployPub, err := ensureDeployKey(config.DeployKeyPath(home), config.DeployKeyPubPath(home))
+	if err != nil {
+		return &ExitError{Code: ExitCrypto, Err: err}
+	}
+
+	var transport gitstore.Transport
+	if !useGitHub {
+		transport = gitstore.FileURLTransport{}
+	} else if token != "" {
+		transport = gitstore.HTTPSTokenTransport{Token: token}
+	} else {
+		tok, _, authErr := githubauth.Select(ctx, []string{"repo"}, githubauth.SelectorOptions{
+			Shell: a.AuthShell, ClientID: githubauth.ClientID,
+			HTTPClient: a.HTTPClient, AllowDeviceFlow: true,
+			PrintCode: func(verifyURL, userCode string) {
+				a.UI.Println(fmt.Sprintf("open %s and enter code %s", verifyURL, userCode))
+			},
+		})
+		if authErr != nil {
+			return &ExitError{Code: ExitSync, Err: authErr}
+		}
+		transport = gitstore.HTTPSTokenTransport{Token: tok}
+	}
+
+	now := a.Now
+	if now == nil {
+		now = time.Now
+	}
+	root, err := fetchStoreDoc(ctx, a, remoteURL, transport, now, os.Getenv("KAUKET_ANCHOR"))
+	if err != nil {
+		return &ExitError{Code: ExitSync, Err: err}
+	}
+	if strings.TrimSpace(f.repo) == "" && root.GitHub.Owner != "" {
+		owner = root.GitHub.Owner
+		repoName = root.GitHub.Repo
+	}
+
 	recipients := anchorRecipients(root)
 	if len(recipients) == 0 {
 		return &ExitError{Code: ExitSync, Err: errors.New("kauket: store.json has no anchor age recipients")}
@@ -198,18 +333,13 @@ func runEnrollV2(ctx context.Context, a *app.App, f *enrollFlags, home string, r
 	}
 	syntheticAuthor := gitstore.Author{Name: "kauket-" + hostID, Email: "kauket@" + hostID + ".local"}
 
-	if f.offline {
-		a.UI.Println("created offline enrollment request")
-		a.UI.Println("")
-		a.UI.Println(fmt.Sprintf("kauket approve --request-code %s", base64.StdEncoding.EncodeToString(ct)))
-	} else {
-		if err := pushEnrollmentRequest(ctx, a, home, remoteURL, transport, requestID, ct, syntheticAuthor, now); err != nil {
-			return &ExitError{Code: ExitSync, Err: err}
-		}
-		a.UI.Println(fmt.Sprintf("created enrollment request %s", requestID))
-		a.UI.Println(fmt.Sprintf("requested paths: %s", strings.Join(paths, ", ")))
-		a.UI.Println("waiting for approval")
+	if err := pushEnrollmentRequest(ctx, a, home, remoteURL, transport, requestID, ct, syntheticAuthor, now); err != nil {
+		return &ExitError{Code: ExitSync, Err: err}
 	}
+	a.UI.Println(fmt.Sprintf("enrolled as %s (%s)", displayName, hostID))
+	a.UI.Println(fmt.Sprintf("created enrollment request %s", requestID))
+	a.UI.Println(fmt.Sprintf("requested paths: %s", strings.Join(paths, ", ")))
+	a.UI.Println("waiting for approval (run 'kauket approve' on your admin machine)")
 
 	clientCfg := &config.Client{
 		Schema:  config.ConfigSchema,
@@ -221,7 +351,7 @@ func runEnrollV2(ctx context.Context, a *app.App, f *enrollFlags, home string, r
 			IdentityPath:  filepath.Join("identities", "host.txt"),
 			DeployKeyPath: filepath.Join("git", "deploy_key"),
 		},
-		Repo:         config.DefaultRepoInfo(effectiveOwner, effectiveRepo),
+		Repo:         config.DefaultRepoInfo(owner, repoName),
 		CommitAuthor: config.CommitAuthor{Name: syntheticAuthor.Name, Email: syntheticAuthor.Email},
 	}
 	if !useGitHub {
@@ -241,27 +371,44 @@ func runEnrollV2(ctx context.Context, a *app.App, f *enrollFlags, home string, r
 	return nil
 }
 
+type requestFlags struct {
+	key    string
+	name   string
+	repo   string
+	remote string
+	yes    bool
+}
+
 func NewRequest(a *app.App) *cobra.Command {
-	var key string
-	var yes bool
+	f := &requestFlags{}
 	cmd := &cobra.Command{
-		Use:   "request <path>",
-		Short: "Request access to a namespace (including everything under it) or a single key",
-		Args:  cobra.ExactArgs(1),
+		Use:   "request <path>...",
+		Short: "Request access to namespaces or a single key; enrolls this machine on first use",
+		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRequest(cmd.Context(), a, args[0], key, yes)
+			return runRequest(cmd.Context(), a, args, f)
 		},
 	}
-	cmd.Flags().StringVar(&key, "key", "", "request a single key inside the namespace")
-	cmd.Flags().BoolVar(&yes, "yes", false, "noninteractive")
+	cmd.Flags().StringVar(&f.key, "key", "", "request a single key inside the namespace (single path only)")
+	cmd.Flags().StringVar(&f.name, "name", "", "host display name on first enrollment; defaults to short hostname")
+	cmd.Flags().StringVar(&f.repo, "repo", "", "owner/repo of the store (first enrollment)")
+	cmd.Flags().StringVar(&f.remote, "remote", "", "explicit Git remote URL (first enrollment)")
+	cmd.Flags().BoolVar(&f.yes, "yes", false, "noninteractive")
 	return cmd
 }
 
-func runRequest(ctx context.Context, a *app.App, pathArg, key string, yes bool) error {
+func runRequest(ctx context.Context, a *app.App, pathArgs []string, f *requestFlags) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	home, identityPath, v2, role, err := resolveV2ReadIdentity(a)
+	if err != nil {
+		return autoEnrollRequest(ctx, a, pathArgs, f)
+	}
+	if f.name != "" || f.repo != "" || f.remote != "" {
+		a.UI.Println("already enrolled; ignoring --name/--repo/--remote")
+	}
+	paths, err := requestPaths(pathArgs, f.key)
 	if err != nil {
 		return &ExitError{Code: ExitUsage, Err: err}
 	}
@@ -275,9 +422,6 @@ func runRequest(ctx context.Context, a *app.App, pathArg, key string, yes bool) 
 		identityID = cfg.Host.ID
 		signKeyPath = cfg.Host.DeployKeyPath
 		repoInfo = cfg.Repo
-		if err := syncClient(ctx, a, home); err != nil {
-			return err
-		}
 	} else {
 		cfg, err := config.LoadAdmin(home)
 		if err != nil {
@@ -289,9 +433,9 @@ func runRequest(ctx context.Context, a *app.App, pathArg, key string, yes bool) 
 		identityID = cfg.V2.IdentityID
 		signKeyPath = cfg.V2.SignKeyPath
 		repoInfo = cfg.Repo
-		if err := syncAdmin(ctx, a, home); err != nil {
-			return err
-		}
+	}
+	if err := syncForRead(ctx, a, role, home); err != nil {
+		return err
 	}
 	if !filepath.IsAbs(signKeyPath) {
 		signKeyPath = filepath.Join(home, signKeyPath)
@@ -304,30 +448,24 @@ func runRequest(ctx context.Context, a *app.App, pathArg, key string, yes bool) 
 		return translateV2ReadError(err)
 	}
 
-	segments := splitNodePath(pathArg)
-	if key != "" {
-		segments = append(segments, key)
-	}
-	if len(segments) == 0 {
-		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: empty request path")}
-	}
-	requestedPath := strings.Join(segments, "/")
-
 	recipients := map[string]bool{}
 	for _, r := range anchorRecipients(&vctx.root) {
 		recipients[r] = true
 	}
-	for probe := segments; len(probe) >= 0; probe = probe[:len(probe)-1] {
-		res, err := manifest.WalkSpine(objectsDir(vctx.repoDir), vctx.root, vctx.pins, vctx.identity, bundle.Ed25519Verifier{}, probe)
-		if err == nil {
-			deepest := res.Nodes[res.SpineIDs[len(res.SpineIDs)-1]]
-			for _, o := range deepest.Body.Owners {
-				recipients[o.AgeRecipient] = true
+	for _, requestedPath := range paths {
+		segments := splitNodePath(requestedPath)
+		for probe := segments; len(probe) >= 0; probe = probe[:len(probe)-1] {
+			res, err := manifest.WalkSpine(objectsDir(vctx.repoDir), vctx.root, vctx.pins, vctx.identity, bundle.Ed25519Verifier{}, probe)
+			if err == nil {
+				deepest := res.Nodes[res.SpineIDs[len(res.SpineIDs)-1]]
+				for _, o := range deepest.Body.Owners {
+					recipients[o.AgeRecipient] = true
+				}
+				break
 			}
-			break
-		}
-		if len(probe) == 0 {
-			break
+			if len(probe) == 0 {
+				break
+			}
 		}
 	}
 	recipientList := make([]string, 0, len(recipients))
@@ -363,7 +501,7 @@ func runRequest(ctx context.Context, a *app.App, pathArg, key string, yes bool) 
 			Arch:             runtime.GOARCH,
 			AgeRecipient:     idRecipient,
 		},
-		Requested: model.RequestedItems{Paths: []string{requestedPath}},
+		Requested: model.RequestedItems{Paths: paths},
 	}
 	pub, err := ensureSignKey(signKeyPath)
 	if err != nil {
@@ -398,7 +536,7 @@ func runRequest(ctx context.Context, a *app.App, pathArg, key string, yes bool) 
 		return &ExitError{Code: ExitSync, Err: err}
 	}
 	a.UI.Println(fmt.Sprintf("created access request %s", requestID))
-	a.UI.Println(fmt.Sprintf("requested: %s", requestedPath))
+	a.UI.Println(fmt.Sprintf("requested: %s", strings.Join(paths, ", ")))
 	a.UI.Println("waiting for approval")
 	return nil
 }
@@ -444,15 +582,18 @@ func runJoin(ctx context.Context, a *app.App, f *joinFlags) error {
 	if len(f.requests) == 0 {
 		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: at least one --request path is required")}
 	}
-	owner, repoName, remoteURL, err := resolveEnrollRemote(&enrollFlags{repo: f.repo, remote: f.remote})
+	owner, repoName, remoteURL, explicit, err := resolveExplicitRemote(f.repo, f.remote)
 	if err != nil {
 		return &ExitError{Code: ExitUsage, Err: err}
+	}
+	if !explicit {
+		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: --remote, --repo, or KAUKET_REPO is required")}
 	}
 	if err := config.EnsureIdentitiesDir(home); err != nil {
 		return &ExitError{Code: ExitUsage, Err: err}
 	}
 	identityPath := config.AdminIdentityPath(home)
-	recipient, err := ensureAdminIdentity(identityPath, "")
+	recipient, err := ensureAdminIdentity(identityPath)
 	if err != nil {
 		return &ExitError{Code: ExitCrypto, Err: err}
 	}
@@ -487,12 +628,9 @@ func runJoin(ctx context.Context, a *app.App, f *joinFlags) error {
 	if expectedAnchor == "" {
 		expectedAnchor = os.Getenv("KAUKET_ANCHOR")
 	}
-	_, root, err := fetchStoreDoc(ctx, a, remoteURL, transport, now, expectedAnchor)
+	root, err := fetchStoreDoc(ctx, a, remoteURL, transport, now, expectedAnchor)
 	if err != nil {
 		return &ExitError{Code: ExitSync, Err: err}
-	}
-	if root == nil {
-		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: join requires a v2 store; this remote holds a v1 store")}
 	}
 
 	var paths []string
@@ -567,6 +705,88 @@ func runJoin(ctx context.Context, a *app.App, f *joinFlags) error {
 	}
 	if err := manifest.SavePins(config.PinsPath(home), pins); err != nil {
 		return &ExitError{Code: ExitUsage, Err: err}
+	}
+	return nil
+}
+
+func splitOwnerRepo(s string) (string, string) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", ""
+	}
+	parts := strings.SplitN(s, "/", 2)
+	if len(parts) != 2 {
+		return "", ""
+	}
+	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+}
+
+func inferOwnerRepoFromRemote(remote string) (string, string) {
+	r := strings.TrimSuffix(remote, ".git")
+	r = strings.TrimSuffix(r, "/")
+	if i := strings.Index(r, "://"); i >= 0 {
+		r = r[i+3:]
+	}
+	if i := strings.Index(r, "@"); i >= 0 {
+		r = r[i+1:]
+	}
+	if i := strings.Index(r, ":"); i >= 0 {
+		r = r[i+1:]
+	}
+	if i := strings.Index(r, "/"); i >= 0 {
+		r = r[i+1:]
+	}
+	parts := strings.Split(r, "/")
+	if len(parts) >= 2 {
+		return parts[len(parts)-2], parts[len(parts)-1]
+	}
+	return "", ""
+}
+
+func shortHostname(h string) string {
+	h = strings.TrimSpace(h)
+	if h == "" {
+		return ""
+	}
+	if i := strings.Index(h, "."); i > 0 {
+		return h[:i]
+	}
+	return h
+}
+
+func pushEnrollmentRequest(ctx context.Context, a *app.App, home, remoteURL string, transport gitstore.Transport, requestID string, ct []byte, author gitstore.Author, now func() time.Time) error {
+	pushDir, err := os.MkdirTemp("", "kauket-enroll-push-")
+	if err != nil {
+		return fmt.Errorf("kauket: temp dir: %w", err)
+	}
+	defer os.RemoveAll(pushDir)
+
+	repoPath := filepath.Join(pushDir, "repo")
+	lockPath := filepath.Join(pushDir, "repo.lock")
+
+	newStore := a.NewStore
+	if newStore == nil {
+		newStore = gitstore.OpenOrClone
+	}
+	if transport == nil {
+		transport = gitstore.SelectTransport(remoteURL, "")
+	}
+	store, err := newStore(ctx, gitstore.Config{
+		RepoPath: repoPath,
+		URL:      remoteURL,
+		LockPath: lockPath,
+		Now:      now,
+	}, transport)
+	if err != nil {
+		return fmt.Errorf("kauket: open remote for push: %w", err)
+	}
+	defer store.Close()
+
+	if err := store.Sync(ctx); err != nil {
+		return fmt.Errorf("kauket: sync remote: %w", err)
+	}
+	if err := store.PushRequest(ctx, requestID, ct, author); err != nil {
+		return fmt.Errorf("kauket: push request: %w", err)
 	}
 	return nil
 }

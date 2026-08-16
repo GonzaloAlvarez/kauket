@@ -143,9 +143,9 @@ func runApproveV2(ctx context.Context, a *app.App, home string, cfg *config.Admi
 			continue
 		}
 		interactive := !f.all && !f.yes
-		if err := approveOneV2(ctx, a, engine, repoDir, vctx, v.req, cfg, useGitHub, token, now, interactive, f.enrollUnknown || f.yes); err != nil {
+		if err := approveOneV2(ctx, a, engine, repoDir, vctx, v.req, cfg, useGitHub, token, now, interactive, f.yes); err != nil {
 			if errors.Is(err, errEnrollSkipped) {
-				a.UI.Println(fmt.Sprintf("request %d: new identity %s needs confirmation or --enroll-unknown; left pending", idx+1, v.req.Host.ID))
+				a.UI.Println(fmt.Sprintf("request %d: new identity %s needs confirmation or --yes; left pending", idx+1, v.req.Host.ID))
 				continue
 			}
 			a.UI.Errorf("request %d: %v", idx+1, err)

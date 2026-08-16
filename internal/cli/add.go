@@ -20,7 +20,6 @@ type addFlags struct {
 	dest          string
 	mode          string
 	directoryMode string
-	profiles      []string
 	awsProfile    string
 	force         bool
 	maxSize       int
@@ -47,7 +46,6 @@ func NewAdd(a *app.App) *cobra.Command {
 	cmd.Flags().StringVar(&f.dest, "dest", "", "destination path on target machines")
 	cmd.Flags().StringVar(&f.mode, "mode", "", "file mode (default inferred)")
 	cmd.Flags().StringVar(&f.directoryMode, "directory-mode", "", "parent directory mode (default inferred)")
-	cmd.Flags().StringArrayVar(&f.profiles, "profile", nil, "repeatable; assigns the secret to a profile (default inferred from secret-id prefix)")
 	cmd.Flags().StringVar(&f.awsProfile, "aws-profile", "", "capture an AWS profile from ~/.aws into secret aws.profile.<name>")
 	cmd.Flags().BoolVar(&f.force, "force", false, "replace existing secret")
 	cmd.Flags().IntVar(&f.maxSize, "max-size", 0, "override max-size cap (bytes); 0 = use default 4MiB")

@@ -444,3 +444,25 @@ func TestGHCLIProviderEnvTokenSkipsUserFlag(t *testing.T) {
 		}
 	}
 }
+
+func TestActiveLoginReturnsActiveAccount(t *testing.T) {
+	sh := &MockShell{RunOutputs: map[string]MockRun{
+		"gh auth status --hostname github.com": {Stdout: []byte(sampleAuthStatusOK)},
+	}}
+	p := &GHCLIProvider{Shell: sh}
+	login, err := p.ActiveLogin(context.Background())
+	if err != nil {
+		t.Fatalf("ActiveLogin: %v", err)
+	}
+	if login != "GonzaloAlvarez" {
+		t.Fatalf("login = %q, want GonzaloAlvarez", login)
+	}
+}
+
+func TestActiveLoginNoGH(t *testing.T) {
+	sh := &MockShell{LookPathErr: exec.ErrNotFound}
+	p := &GHCLIProvider{Shell: sh}
+	if _, err := p.ActiveLogin(context.Background()); !errors.Is(err, ErrGHNotInstalled) {
+		t.Fatalf("err = %v, want ErrGHNotInstalled", err)
+	}
+}

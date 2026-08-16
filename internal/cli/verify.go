@@ -19,16 +19,14 @@ import (
 )
 
 func NewVerify(a *app.App) *cobra.Command {
-	var noSync bool
 	var installs bool
 	cmd := &cobra.Command{
 		Use:   "verify",
 		Short: "Audit the v2 store: signature chain, hashes, version pins",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runVerify(cmd.Context(), a, noSync, installs)
+			return runVerify(cmd.Context(), a, installs)
 		},
 	}
-	cmd.Flags().BoolVar(&noSync, "no-sync", false, "do not sync first")
 	cmd.Flags().BoolVar(&installs, "installs", false, "pre-flight every readable secret's install target against client install policy")
 	return cmd
 }
@@ -59,7 +57,7 @@ func resolveV2ReadIdentity(a *app.App) (home, identityPath string, v2 *config.V2
 	return "", "", nil, "", errors.New("kauket: no kauket store configured here; run 'kauket init' or 'kauket enroll' first")
 }
 
-func runVerify(ctx context.Context, a *app.App, noSync, installs bool) error {
+func runVerify(ctx context.Context, a *app.App, installs bool) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -67,15 +65,8 @@ func runVerify(ctx context.Context, a *app.App, noSync, installs bool) error {
 	if err != nil {
 		return &ExitError{Code: ExitUsage, Err: err}
 	}
-	if !noSync {
-		if role == config.RoleAdmin {
-			err = syncAdmin(ctx, a, home)
-		} else {
-			err = syncClient(ctx, a, home)
-		}
-		if err != nil {
-			return err
-		}
+	if err := syncForRead(ctx, a, role, home); err != nil {
+		return err
 	}
 	if !isV2Store(config.RepoDir(home)) {
 		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: verify requires a v2 store; migrate legacy v1 stores with the kauket v2.0.x release ('kauket migrate-store')")}

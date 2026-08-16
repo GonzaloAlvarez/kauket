@@ -49,9 +49,7 @@ func TestV2TwoOwnerIndependentGrant(t *testing.T) {
 
 	clientBase := t.TempDir()
 	clientApp := &app.App{UI: &ui.Fake{}, Home: clientBase}
-	if err := runEnroll(context.Background(), clientApp, &enrollFlags{
-		requests: []string{"other/nothing"}, name: "newmachine", remote: remoteURL, yes: true,
-	}); err != nil {
+	if err := runRequest(context.Background(), clientApp, []string{"other/nothing"}, &requestFlags{name: "newmachine", remote: remoteURL, yes: true}); err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
 	fx.fake.Lines = nil
@@ -83,7 +81,7 @@ func TestV2TwoOwnerIndependentGrant(t *testing.T) {
 		t.Fatalf("content = %q", out)
 	}
 
-	if err := runVerify(context.Background(), clientApp, true, false); err != nil {
+	if err := runVerify(context.Background(), clientApp, false); err != nil {
 		t.Fatalf("client verify accepts user-signed manifest: %v", err)
 	}
 }
@@ -112,7 +110,7 @@ func TestV2RevokeOwner(t *testing.T) {
 		t.Fatalf("revoked owner grant err = %v, want access refusal", err)
 	}
 
-	if err := runVerify(context.Background(), fx.app, true, false); err != nil {
+	if err := runVerify(context.Background(), fx.app, false); err != nil {
 		t.Fatalf("verify: %v", err)
 	}
 }
@@ -164,7 +162,7 @@ func TestV2RootOwnerBecomesAnchor(t *testing.T) {
 		t.Fatalf("user still in store.json after root owner revoke")
 	}
 
-	if err := runVerify(context.Background(), fx.app, true, false); err != nil {
+	if err := runVerify(context.Background(), fx.app, false); err != nil {
 		t.Fatalf("verify: %v", err)
 	}
 }
@@ -186,9 +184,7 @@ func TestV2MachineOwnerWarns(t *testing.T) {
 	fx, remoteURL, _ := v2StoreWithSecret(t)
 	clientBase := t.TempDir()
 	clientApp := &app.App{UI: &ui.Fake{}, Home: clientBase}
-	if err := runEnroll(context.Background(), clientApp, &enrollFlags{
-		requests: []string{"cloud/vendor"}, name: "machine-owner", remote: remoteURL, yes: true,
-	}); err != nil {
+	if err := runRequest(context.Background(), clientApp, []string{"cloud/vendor"}, &requestFlags{name: "machine-owner", remote: remoteURL, yes: true}); err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
 	if err := runApprove(context.Background(), fx.app, &approveFlags{all: true, yes: true}); err != nil {

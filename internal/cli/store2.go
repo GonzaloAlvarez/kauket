@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"filippo.io/age"
 	"github.com/gonzaloalvarez/kauket/internal/agebox"
 	"github.com/gonzaloalvarez/kauket/internal/bundle"
 	"github.com/gonzaloalvarez/kauket/internal/config"
@@ -45,7 +46,7 @@ func requireV2StoreDir(repoDir string) error {
 		return nil
 	}
 	if _, err := os.Stat(repoDir); errors.Is(err, os.ErrNotExist) {
-		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: no local store clone found; run 'kauket sync' first")}
+		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: could not reach the remote and no local store copy exists")}
 	}
 	return &ExitError{Code: ExitUsage, Err: errors.New("kauket: this store uses the legacy v1 schema; migrate it with the kauket v2.0.x release ('kauket migrate-store') before using this version")}
 }
@@ -320,4 +321,83 @@ func removeStoreAnchor(repoDir, signKeyPath, identityID string) error {
 		root.TrustAnchors = kept
 		return nil
 	})
+}
+
+func ensureHostIdentity(path string) (string, error) {
+	if data, err := os.ReadFile(path); err == nil {
+		ids, parseErr := agebox.ParseIdentity(data)
+		if parseErr != nil {
+			return "", parseErr
+		}
+		if len(ids) != 1 {
+			return "", fmt.Errorf("kauket: existing host identity must contain exactly one identity, found %d", len(ids))
+		}
+		x, ok := ids[0].(*age.X25519Identity)
+		if !ok {
+			return "", errors.New("kauket: existing host identity must be an X25519 identity")
+		}
+		return x.Recipient().String(), nil
+	}
+	id, err := agebox.GenerateIdentity()
+	if err != nil {
+		return "", err
+	}
+	if err := writeIdentityFile(path, []byte(id.String()+"\n")); err != nil {
+		return "", err
+	}
+	return id.Recipient().String(), nil
+}
+
+func ensureDeployKey(privPath, pubPath string) (string, error) {
+	if data, err := os.ReadFile(privPath); err == nil {
+		signer, parseErr := cryptossh.ParsePrivateKey(data)
+		if parseErr != nil {
+			return "", fmt.Errorf("kauket: parse existing deploy key: %w", parseErr)
+		}
+		if signer.PublicKey().Type() != cryptossh.KeyAlgoED25519 {
+			return "", errors.New("kauket: existing deploy key is not ed25519")
+		}
+		pub := strings.TrimSpace(string(cryptossh.MarshalAuthorizedKey(signer.PublicKey())))
+		if _, statErr := os.Stat(pubPath); statErr != nil {
+			if err := writeFileMode(pubPath, []byte(pub+"\n"), 0o644); err != nil {
+				return "", err
+			}
+		}
+		return pub, nil
+	}
+
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return "", fmt.Errorf("kauket: generate deploy key: %w", err)
+	}
+	block, err := cryptossh.MarshalPrivateKey(priv, "kauket-deploy")
+	if err != nil {
+		return "", fmt.Errorf("kauket: marshal deploy key: %w", err)
+	}
+	pemBytes := pem.EncodeToMemory(block)
+	if err := writeFileMode(privPath, pemBytes, 0o600); err != nil {
+		return "", err
+	}
+	sshPub, err := cryptossh.NewPublicKey(pub)
+	if err != nil {
+		return "", fmt.Errorf("kauket: build public key: %w", err)
+	}
+	pubAuthorized := strings.TrimSpace(string(cryptossh.MarshalAuthorizedKey(sshPub)))
+	if err := writeFileMode(pubPath, []byte(pubAuthorized+"\n"), 0o644); err != nil {
+		return "", err
+	}
+	return pubAuthorized, nil
+}
+
+func writeFileMode(path string, data []byte, mode os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("kauket: ensure dir: %w", err)
+	}
+	if err := os.WriteFile(path, data, mode); err != nil {
+		return fmt.Errorf("kauket: write %s: %w", path, err)
+	}
+	if err := os.Chmod(path, mode); err != nil {
+		return fmt.Errorf("kauket: chmod %s: %w", path, err)
+	}
+	return nil
 }

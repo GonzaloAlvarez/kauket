@@ -20,9 +20,7 @@ func initV2Fixture(t *testing.T) (*testAppBundle, string) {
 	flags := &initFlags{
 		owner:       "GonzaloAlvarez",
 		repo:        "kauket-store",
-		private:     true,
 		remote:      bareRepo(t),
-		noGitHub:    true,
 		yes:         true,
 		recoveryOut: recoveryOut,
 	}
@@ -72,7 +70,7 @@ func TestInitV2CreatesReadableStore(t *testing.T) {
 	}
 
 	fx.fake.Lines = nil
-	if err := runVerify(context.Background(), fx.app, true, false); err != nil {
+	if err := runVerify(context.Background(), fx.app, false); err != nil {
 		t.Fatalf("verify: %v", err)
 	}
 	if len(fx.fake.Lines) != 1 || fx.fake.Lines[0] != "verified 1 nodes, 0 entries" {
@@ -80,7 +78,7 @@ func TestInitV2CreatesReadableStore(t *testing.T) {
 	}
 
 	fx.fake.Lines = nil
-	if err := runStatus(fx.app, ""); err != nil {
+	if err := runStatus(context.Background(), fx.app, ""); err != nil {
 		t.Fatalf("status: %v", err)
 	}
 	joined := strings.Join(fx.fake.Lines, "\n")
@@ -89,7 +87,7 @@ func TestInitV2CreatesReadableStore(t *testing.T) {
 	}
 
 	fx.fake.Lines = nil
-	if err := runList(fx.app, ""); err != nil {
+	if err := runList(context.Background(), fx.app, ""); err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	if len(fx.fake.Lines) != 0 {
@@ -99,7 +97,7 @@ func TestInitV2CreatesReadableStore(t *testing.T) {
 
 func TestInitV2RequiresRecoveryOut(t *testing.T) {
 	a, _, _ := newTestApp(t)
-	flags := &initFlags{owner: "o", repo: "r", remote: bareRepo(t), noGitHub: true, yes: true}
+	flags := &initFlags{owner: "o", repo: "r", remote: bareRepo(t), yes: true}
 	err := runInit(context.Background(), a, flags)
 	if err == nil || !strings.Contains(err.Error(), "--recovery-out") {
 		t.Fatalf("err = %v", err)
@@ -133,13 +131,13 @@ func v2StoreFixture(t *testing.T) (adminApp *app.App, adminFake *ui.Fake, adminB
 	cBase := t.TempDir()
 	cFake := &ui.Fake{}
 	cApp := &app.App{UI: cFake, Home: cBase}
-	if err := runEnroll(context.Background(), cApp, &enrollFlags{requests: []string{"ssh"}, name: "machine2", remote: bareURL, yes: true}); err != nil {
+	if err := runRequest(context.Background(), cApp, []string{"ssh"}, &requestFlags{name: "machine2", remote: bareURL, yes: true}); err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
 	if err := runApprove(context.Background(), aApp, &approveFlags{all: true, yes: true}); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
-	if err := runSync(context.Background(), cApp, ""); err != nil {
+	if err := syncClient(context.Background(), cApp, config.RoleHome(cBase, config.RoleClient)); err != nil {
 		t.Fatalf("client sync: %v", err)
 	}
 	aFake.Lines = nil
@@ -157,7 +155,7 @@ func TestV2StoreEndToEnd(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		if err := runGet(context.Background(), adminApp, &getFlags{stdout: true, noSync: true}, "ssh.main_private_key"); err != nil {
+		if err := runGet(context.Background(), adminApp, &getFlags{stdout: true}, "ssh.main_private_key"); err != nil {
 			t.Fatalf("admin get: %v", err)
 		}
 	})
@@ -174,14 +172,14 @@ func TestV2StoreEndToEnd(t *testing.T) {
 		t.Fatalf("client get content mismatch")
 	}
 
-	err := runGet(context.Background(), clientApp, &getFlags{stdout: true, noSync: true}, "aws.profile.amzn-wanfe")
+	err := runGet(context.Background(), clientApp, &getFlags{stdout: true}, "aws.profile.amzn-wanfe")
 	var exitErr *ExitError
 	if !errors.As(err, &exitErr) || exitErr.Code != ExitNotGranted {
 		t.Fatalf("client aws get err = %v, want ExitNotGranted", err)
 	}
 
 	clientFake.Lines = nil
-	if err := runList(clientApp, ""); err != nil {
+	if err := runList(context.Background(), clientApp, ""); err != nil {
 		t.Fatalf("client list: %v", err)
 	}
 	if len(clientFake.Lines) != 1 || clientFake.Lines[0] != "ssh.main_private_key" {
@@ -189,7 +187,7 @@ func TestV2StoreEndToEnd(t *testing.T) {
 	}
 
 	adminFake.Lines = nil
-	if err := runList(adminApp, ""); err != nil {
+	if err := runList(context.Background(), adminApp, ""); err != nil {
 		t.Fatalf("admin list: %v", err)
 	}
 	joined := strings.Join(adminFake.Lines, "\n")
@@ -198,7 +196,7 @@ func TestV2StoreEndToEnd(t *testing.T) {
 	}
 
 	clientFake.Lines = nil
-	if err := runVerify(context.Background(), clientApp, true, false); err != nil {
+	if err := runVerify(context.Background(), clientApp, false); err != nil {
 		t.Fatalf("client verify: %v", err)
 	}
 }
@@ -224,7 +222,8 @@ func TestVerifyDetectsTamperedObject(t *testing.T) {
 	if !tampered {
 		t.Fatalf("no secret object found to tamper")
 	}
-	err = runVerify(context.Background(), adminApp, true, false)
+	breakStoreRemote(t, adminHome)
+	err = runVerify(context.Background(), adminApp, false)
 	var exitErr *ExitError
 	if !errors.As(err, &exitErr) || exitErr.Code != ExitCrypto {
 		t.Fatalf("verify err = %v, want ExitCrypto", err)

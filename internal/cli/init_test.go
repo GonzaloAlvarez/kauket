@@ -48,9 +48,7 @@ func TestInitFreshLocalRemoteWritesExpectedFiles(t *testing.T) {
 	flags := &initFlags{
 		owner:       "GonzaloAlvarez",
 		repo:        "kauket-store",
-		private:     true,
 		remote:      remoteURL,
-		noGitHub:    true,
 		yes:         true,
 		recoveryOut: recoveryOut,
 	}
@@ -134,9 +132,7 @@ func TestInitRefusesExistingV2Store(t *testing.T) {
 	flags := &initFlags{
 		owner:       "GonzaloAlvarez",
 		repo:        "kauket-store",
-		private:     true,
 		remote:      remoteURL,
-		noGitHub:    true,
 		yes:         true,
 		recoveryOut: filepath.Join(t.TempDir(), "recovery"),
 	}
@@ -167,14 +163,12 @@ func TestInitRefusesExistingV2Store(t *testing.T) {
 	}
 }
 
-func TestInitRefusesSSHRemoteWithoutNoGitHub(t *testing.T) {
+func TestInitRefusesSSHRemote(t *testing.T) {
 	a, _, _ := newTestApp(t)
 	flags := &initFlags{
 		owner:       "GonzaloAlvarez",
 		repo:        "kauket-store",
-		private:     true,
 		remote:      "git@github.com:GonzaloAlvarez/kauket-store.git",
-		noGitHub:    false,
 		yes:         true,
 		recoveryOut: filepath.Join(t.TempDir(), "recovery"),
 	}
@@ -182,8 +176,46 @@ func TestInitRefusesSSHRemoteWithoutNoGitHub(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected SSH remote refusal")
 	}
-	if !strings.Contains(err.Error(), "SSH") {
-		t.Fatalf("expected SSH mention, got %q", err.Error())
+	if !strings.Contains(err.Error(), "HTTPS github.com URL or a local file URL") {
+		t.Fatalf("expected remote-scheme refusal, got %q", err.Error())
+	}
+}
+
+func TestInitDetectsOwnerFromGHConfirmDeclined(t *testing.T) {
+	a, fake, _ := newTestApp(t)
+	a.AuthShell = cannedGHShell{login: "testowner"}
+	fake.ConfirmReply = false
+	flags := &initFlags{
+		repo:        "kauket-store",
+		recoveryOut: filepath.Join(t.TempDir(), "recovery"),
+	}
+	err := runInit(context.Background(), a, flags)
+	if err == nil {
+		t.Fatalf("expected error when repo confirmation is declined")
+	}
+	if strings.Contains(err.Error(), "could not detect") {
+		t.Fatalf("gh detection should have succeeded, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "pass --owner or --remote") {
+		t.Fatalf("expected decline hint, got %q", err.Error())
+	}
+}
+
+func TestInitFileRemoteSkipsGH(t *testing.T) {
+	a, _, home := newTestApp(t)
+	a.AuthShell = failingShell{}
+	flags := &initFlags{
+		owner:       "GonzaloAlvarez",
+		repo:        "kauket-store",
+		remote:      bareRepo(t),
+		yes:         true,
+		recoveryOut: filepath.Join(t.TempDir(), "recovery"),
+	}
+	if err := runInit(context.Background(), a, flags); err != nil {
+		t.Fatalf("init with file remote must never call gh: %v", err)
+	}
+	if _, err := config.LoadAdmin(config.RoleHome(home, config.RoleAdmin)); err != nil {
+		t.Fatalf("load admin: %v", err)
 	}
 }
 

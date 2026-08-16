@@ -16,11 +16,14 @@ func TestDualRoleLocalE2E(t *testing.T) {
 	root := mustResolvedTempRoot(t)
 	home := filepath.Join(root, "dual-home")
 	kauketHome := filepath.Join(home, ".config", "kauket")
+	clientTmpHome := filepath.Join(root, "client-home")
+	clientTmpKauket := filepath.Join(clientTmpHome, ".config", "kauket")
 	bareDir := filepath.Join(root, "bare-remote.git")
 	mustMkdir(t, home, 0o700)
+	mustMkdir(t, clientTmpHome, 0o700)
 	remoteURL := setupBareRemote(t, bareDir)
 
-	res := runKauket(t, bin, kauketHome, home, "init", "--remote", remoteURL, "--no-github", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
+	res := runKauket(t, bin, kauketHome, home, "init", "--remote", remoteURL, "--recovery-out", filepath.Join(root, "recovery"), "--yes")
 	if res.err != nil {
 		t.Fatalf("init: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -32,7 +35,7 @@ func TestDualRoleLocalE2E(t *testing.T) {
 		t.Fatalf("add: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
 
-	res = runKauket(t, bin, kauketHome, home, "enroll", "--remote", remoteURL, "--request", "ssh", "--name", "dualhost", "--yes")
+	res = runKauket(t, bin, clientTmpKauket, clientTmpHome, "request", "ssh", "--remote", remoteURL, "--name", "dualhost", "--yes")
 	if res.err != nil {
 		t.Fatalf("enroll: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -40,6 +43,10 @@ func TestDualRoleLocalE2E(t *testing.T) {
 	res = runKauket(t, bin, kauketHome, home, "approve", "--all", "--yes")
 	if res.err != nil {
 		t.Fatalf("approve: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
+	}
+
+	if err := os.Rename(filepath.Join(clientTmpKauket, "client"), filepath.Join(kauketHome, "client")); err != nil {
+		t.Fatalf("move client role into dual home: %v", err)
 	}
 
 	res = runKauket(t, bin, kauketHome, home, "get", "ssh.main_private_key")
@@ -66,19 +73,9 @@ func TestDualRoleLocalE2E(t *testing.T) {
 		t.Fatalf("status should show both roles, got: %q", res.stdout)
 	}
 
-	res = runKauket(t, bin, kauketHome, home, "sync")
-	if res.err != nil {
-		t.Fatalf("sync: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
-	}
-	if !strings.Contains(res.stdout, "synced admin") || !strings.Contains(res.stdout, "synced client") {
-		t.Fatalf("sync should report both roles, got: %q", res.stdout)
-	}
-
 	for _, p := range []string{
 		filepath.Join(kauketHome, "admin", "repo", "store.json"),
 		filepath.Join(kauketHome, "client", "repo", "store.json"),
-		filepath.Join(kauketHome, "admin", "repo.lock"),
-		filepath.Join(kauketHome, "client", "repo.lock"),
 	} {
 		if _, err := os.Stat(p); err != nil {
 			t.Fatalf("expected per-role file %s: %v", p, err)

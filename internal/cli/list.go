@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -15,14 +16,14 @@ func NewList(a *app.App) *cobra.Command {
 		Use:   "list",
 		Short: "List secrets visible to this role",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runList(a, roleFlag)
+			return runList(cmd.Context(), a, roleFlag)
 		},
 	}
 	cmd.Flags().StringVar(&roleFlag, "role", "", "limit to one role (admin|client)")
 	return cmd
 }
 
-func runList(a *app.App, roleFlag string) error {
+func runList(ctx context.Context, a *app.App, roleFlag string) error {
 	targets, err := resolveTargetRoles(a, roleFlag)
 	if err != nil {
 		return err
@@ -37,6 +38,9 @@ func runList(a *app.App, roleFlag string) error {
 				a.UI.Println("")
 			}
 			a.UI.Println(fmt.Sprintf("role: %s", t.role))
+		}
+		if err := syncForRead(ctx, a, t.role, t.home); err != nil {
+			return err
 		}
 		if t.role == config.RoleAdmin {
 			err = listAdmin(a, t.home)

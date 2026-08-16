@@ -83,7 +83,7 @@ func TestGitHubInitEnrollApproveGet(t *testing.T) {
 	mustMkdir(t, clientHome, 0o700)
 
 	res := runKauket(t, bin, adminKauket, adminHome,
-		"init", "--owner", owner, "--repo", repo, "--private", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
+		"init", "--owner", owner, "--repo", repo, "--recovery-out", filepath.Join(root, "recovery"), "--yes")
 	if res.err != nil {
 		t.Fatalf("init failed: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -111,7 +111,7 @@ func TestGitHubInitEnrollApproveGet(t *testing.T) {
 	}
 
 	res = runKauket(t, bin, clientKauket, clientHome,
-		"enroll", "--repo", repoSlug, "--request", "ssh", "--name", randomEnrollName(), "--yes")
+		"request", "ssh", "--repo", repoSlug, "--name", randomEnrollName(), "--yes")
 	if res.err != nil {
 		t.Fatalf("enroll: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -159,9 +159,6 @@ func TestGitHubInitEnrollApproveGet(t *testing.T) {
 		res = runKauket(t, bin, clientKauket, clientHome, "get", "ssh.main_private_key")
 		if res.err != nil {
 			t.Fatalf("client get over SSH deploy key: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
-		}
-		if !strings.Contains(res.stdout, "syncing store") {
-			t.Fatalf("expected 'syncing store' in get stdout, got: %q", res.stdout)
 		}
 		if !strings.Contains(res.stdout, "creating ~/.ssh/main_private_key") {
 			t.Fatalf("expected 'creating ~/.ssh/main_private_key' in get stdout, got: %q", res.stdout)

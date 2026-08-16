@@ -51,7 +51,7 @@ func TestAddSshSecretInfersSpecAndStaysEncrypted(t *testing.T) {
 		t.Fatalf("read fixture: %v", err)
 	}
 	out := captureStdout(t, func() {
-		if err := runGet(context.Background(), a, &getFlags{stdout: true, noSync: true}, "ssh.main_private_key"); err != nil {
+		if err := runGet(context.Background(), a, &getFlags{stdout: true}, "ssh.main_private_key"); err != nil {
 			t.Fatalf("admin get: %v", err)
 		}
 	})

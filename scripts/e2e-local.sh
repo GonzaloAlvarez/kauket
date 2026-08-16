@@ -17,15 +17,15 @@ git init --bare -b main "$REMOTE" >/dev/null
 go build -o "$ROOT/kauket" ./cmd/kauket
 
 echo "=== init admin ==="
-KAUKET_HOME="$ADMIN_HOME/.config/kauket" HOME="$ADMIN_HOME" "$ROOT/kauket" init --remote "file://$REMOTE" --no-github --recovery-out "$ROOT/recovery" --yes
+KAUKET_HOME="$ADMIN_HOME/.config/kauket" HOME="$ADMIN_HOME" "$ROOT/kauket" init --remote "file://$REMOTE" --recovery-out "$ROOT/recovery" --yes
 
 echo "=== generate + add ssh key ==="
 mkdir -p "$ADMIN_HOME/.ssh"
 ssh-keygen -t ed25519 -N "" -f "$ADMIN_HOME/.ssh/main_private_key.pem" -q
 KAUKET_HOME="$ADMIN_HOME/.config/kauket" HOME="$ADMIN_HOME" "$ROOT/kauket" add ssh.main_private_key "$ADMIN_HOME/.ssh/main_private_key.pem"
 
-echo "=== enroll client ==="
-KAUKET_HOME="$MACHINE_HOME/.config/kauket" HOME="$MACHINE_HOME" "$ROOT/kauket" enroll --remote "file://$REMOTE" --request ssh --name machine2 --yes
+echo "=== request (auto-enroll) client ==="
+KAUKET_HOME="$MACHINE_HOME/.config/kauket" HOME="$MACHINE_HOME" "$ROOT/kauket" request ssh --remote "file://$REMOTE" --name machine2 --yes
 
 echo "=== approve ==="
 KAUKET_HOME="$ADMIN_HOME/.config/kauket" HOME="$ADMIN_HOME" "$ROOT/kauket" approve --all --yes

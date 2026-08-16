@@ -5,58 +5,39 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gonzaloalvarez/kauket/internal/app"
 	"github.com/gonzaloalvarez/kauket/internal/config"
 	"github.com/gonzaloalvarez/kauket/internal/githubauth"
 	"github.com/gonzaloalvarez/kauket/internal/gitstore"
-	"github.com/spf13/cobra"
 )
 
-func NewSync(a *app.App) *cobra.Command {
-	var roleFlag string
-	cmd := &cobra.Command{
-		Use:   "sync",
-		Short: "Sync the local kauket store with the remote",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSync(cmd.Context(), a, roleFlag)
-		},
-	}
-	cmd.Flags().StringVar(&roleFlag, "role", "", "limit to one role (admin|client)")
-	return cmd
-}
+const readSyncTimeout = 20 * time.Second
 
-func runSync(ctx context.Context, a *app.App, roleFlag string) error {
+func syncForRead(ctx context.Context, a *app.App, role config.Role, home string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	targets, err := resolveTargetRoles(a, roleFlag)
-	if err != nil {
-		return err
+	sctx, cancel := context.WithTimeout(ctx, readSyncTimeout)
+	defer cancel()
+	var err error
+	if role == config.RoleAdmin {
+		err = syncAdminWith(sctx, a, home, false)
+	} else {
+		err = syncClient(sctx, a, home)
 	}
-	if len(targets) == 0 {
-		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: no kauket store configured here; run 'kauket init' or 'kauket enroll' first")}
+	if err == nil {
+		return nil
 	}
-	dual := len(targets) > 1
-	for _, t := range targets {
-		if t.role == config.RoleAdmin {
-			err = syncAdmin(ctx, a, t.home)
-		} else {
-			err = syncClient(ctx, a, t.home)
-		}
-		if err != nil {
-			return err
-		}
-		if dual {
-			a.UI.Println(fmt.Sprintf("synced %s", t.role))
-		} else {
-			a.UI.Println("synced")
-		}
+	if isV2Store(config.RepoDir(home)) {
+		a.UI.Errorf("kauket: sync failed (%v); using local store copy", err)
+		return nil
 	}
-	return nil
+	return err
 }
 
-func syncAdmin(ctx context.Context, a *app.App, home string) error {
+func syncAdminWith(ctx context.Context, a *app.App, home string, allowDeviceFlow bool) error {
 	cfg, err := config.LoadAdmin(home)
 	if err != nil {
 		return &ExitError{Code: ExitUsage, Err: err}
@@ -65,7 +46,7 @@ func syncAdmin(ctx context.Context, a *app.App, home string) error {
 	if remoteURL == "" {
 		return &ExitError{Code: ExitUsage, Err: errors.New("kauket: stored remote URL is empty")}
 	}
-	transport, err := buildAdminSyncTransport(ctx, a, remoteURL, cfg.Repo.Owner)
+	transport, err := buildAdminTransport(ctx, a, remoteURL, cfg.Repo.Owner, allowDeviceFlow)
 	if err != nil {
 		return &ExitError{Code: ExitSync, Err: err}
 	}
@@ -111,6 +92,10 @@ func syncOne(ctx context.Context, a *app.App, home, remoteURL string, transport 
 }
 
 func buildAdminSyncTransport(ctx context.Context, a *app.App, remoteURL, account string) (gitstore.Transport, error) {
+	return buildAdminTransport(ctx, a, remoteURL, account, true)
+}
+
+func buildAdminTransport(ctx context.Context, a *app.App, remoteURL, account string, allowDeviceFlow bool) (gitstore.Transport, error) {
 	if strings.HasPrefix(remoteURL, "file://") {
 		return gitstore.FileURLTransport{}, nil
 	}
@@ -119,7 +104,7 @@ func buildAdminSyncTransport(ctx context.Context, a *app.App, remoteURL, account
 		ClientID:        githubauth.ClientID,
 		Account:         account,
 		HTTPClient:      a.HTTPClient,
-		AllowDeviceFlow: true,
+		AllowDeviceFlow: allowDeviceFlow,
 		PrintCode: func(verifyURL, userCode string) {
 			a.UI.Println(fmt.Sprintf("open %s and enter code %s", verifyURL, userCode))
 		},

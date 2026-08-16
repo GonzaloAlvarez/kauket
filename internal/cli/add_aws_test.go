@@ -66,7 +66,7 @@ func TestAddAWSProfileCapturesIntoStore(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		if err := runGet(context.Background(), a, &getFlags{stdout: true, noSync: true}, "aws.profile.amzn-wanfe"); err != nil {
+		if err := runGet(context.Background(), a, &getFlags{stdout: true}, "aws.profile.amzn-wanfe"); err != nil {
 			t.Fatalf("admin get: %v", err)
 		}
 	})

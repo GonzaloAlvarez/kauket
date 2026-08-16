@@ -34,7 +34,7 @@ func TestGetLocalE2E(t *testing.T) {
 	}
 	remoteURL := setupBareRemote(t, bareDir)
 
-	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--no-github", "--recovery-out", filepath.Join(root, "recovery"), "--yes")
+	res := runKauket(t, bin, adminKauket, adminHome, "init", "--remote", remoteURL, "--recovery-out", filepath.Join(root, "recovery"), "--yes")
 	if res.err != nil {
 		t.Fatalf("admin init failed: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -47,7 +47,7 @@ func TestGetLocalE2E(t *testing.T) {
 		t.Fatalf("admin add failed: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
 
-	res = runKauket(t, bin, clientKauket, clientHome, "enroll", "--remote", remoteURL, "--request", "ssh", "--name", "machine2", "--yes")
+	res = runKauket(t, bin, clientKauket, clientHome, "request", "ssh", "--remote", remoteURL, "--name", "machine2", "--yes")
 	if res.err != nil {
 		t.Fatalf("enroll failed: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
 	}
@@ -60,9 +60,6 @@ func TestGetLocalE2E(t *testing.T) {
 	res = runKauket(t, bin, clientKauket, clientHome, "get", "ssh.main_private_key")
 	if res.err != nil {
 		t.Fatalf("get failed: %v\nstdout:%s\nstderr:%s", res.err, res.stdout, res.stderr)
-	}
-	if !strings.Contains(res.stdout, "syncing store") {
-		t.Fatalf("expected 'syncing store' in stdout, got: %q", res.stdout)
 	}
 	if !strings.Contains(res.stdout, "creating ~/.ssh/main_private_key") {
 		t.Fatalf("expected 'creating ~/.ssh/main_private_key' in stdout, got: %q", res.stdout)

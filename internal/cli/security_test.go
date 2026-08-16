@@ -16,9 +16,7 @@ func TestApproveRejectsTraversalHostID(t *testing.T) {
 
 	attackerBase := t.TempDir()
 	attackerApp := &app.App{UI: &ui.Fake{}, Home: attackerBase}
-	if err := runEnroll(context.Background(), attackerApp, &enrollFlags{
-		requests: []string{"cloud/vendor"}, name: "attacker", remote: remoteURL, yes: true,
-	}); err != nil {
+	if err := runRequest(context.Background(), attackerApp, []string{"cloud/vendor"}, &requestFlags{name: "attacker", remote: remoteURL, yes: true}); err != nil {
 		t.Fatalf("enroll: %v", err)
 	}
 	attackerHome := config.RoleHome(attackerBase, config.RoleClient)
@@ -31,7 +29,7 @@ func TestApproveRejectsTraversalHostID(t *testing.T) {
 		t.Fatalf("save attacker: %v", err)
 	}
 	attackerApp.UI = &ui.Fake{}
-	if err := runRequest(context.Background(), attackerApp, "cloud/vendor", "", true); err != nil {
+	if err := runRequest(context.Background(), attackerApp, []string{"cloud/vendor"}, &requestFlags{yes: true}); err != nil {
 		t.Fatalf("request: %v", err)
 	}
 
@@ -51,22 +49,11 @@ func TestApproveRejectsTraversalHostID(t *testing.T) {
 	}
 }
 
-func TestResealAlreadySealed(t *testing.T) {
-	fx, _, _ := v2StoreWithSecret(t)
-	fx.fake.Lines = nil
-	if err := runReseal(context.Background(), fx.app); err != nil {
-		t.Fatalf("reseal: %v", err)
-	}
-	if !strings.Contains(strings.Join(fx.fake.Lines, "\n"), "already sealed") {
-		t.Fatalf("expected already-sealed message, got: %v", fx.fake.Lines)
-	}
-}
-
 func TestGrantSubtreeTrailingSlashE2E(t *testing.T) {
 	adminApp, _, _, clientApp, _, clientBase, _ := v2StoreFixture(t)
 	hostID := clientHostID(t, clientBase)
 
-	err := runGet(context.Background(), clientApp, &getFlags{stdout: true, noSync: true}, "aws.profile.amzn-wanfe")
+	err := runGet(context.Background(), clientApp, &getFlags{stdout: true}, "aws.profile.amzn-wanfe")
 	var exitErr *ExitError
 	if !errors.As(err, &exitErr) || exitErr.Code != ExitNotGranted {
 		t.Fatalf("pre-grant get err = %v, want ExitNotGranted", err)
@@ -88,12 +75,10 @@ func TestGrantSubtreeTrailingSlashE2E(t *testing.T) {
 func TestEnrollWrongAnchorRefused(t *testing.T) {
 	_, remoteURL, _ := v2StoreWithSecret(t)
 
+	t.Setenv("KAUKET_ANCHOR", "SHA256:definitelyNotTheRealAnchorFingerprintAAAAAAAAAAAAAAAAAAA")
 	clientBase := t.TempDir()
 	clientApp := &app.App{UI: &ui.Fake{}, Home: clientBase}
-	err := runEnroll(context.Background(), clientApp, &enrollFlags{
-		requests: []string{"cloud/vendor"}, name: "pinned", remote: remoteURL, yes: true,
-		anchor: "SHA256:definitelyNotTheRealAnchorFingerprintAAAAAAAAAAAAAAAAAAA",
-	})
+	err := runRequest(context.Background(), clientApp, []string{"cloud/vendor"}, &requestFlags{name: "pinned", remote: remoteURL, yes: true})
 	if err == nil {
 		t.Fatalf("enroll with wrong anchor should fail")
 	}
